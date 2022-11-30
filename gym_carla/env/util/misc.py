@@ -36,9 +36,12 @@ def test_waypoint(waypoint):
             since there are some defects in OpenDrive file to determine whether ego vehicle drive out of chosen route
         False means this function is used elswhere in Carla Env
     """
-    if (waypoint.road_id in STRAIGHT or waypoint.road_id in JUNCTION) and waypoint.lane_id == -1:
-        return True
-    if waypoint.road_id in CURVE and waypoint.lane_id == 1:
+    # if (waypoint.road_id in STRAIGHT or waypoint.road_id in JUNCTION) and waypoint.lane_id == -1:
+    #     return True
+    # if waypoint.road_id in CURVE and waypoint.lane_id == 1:
+    #     return True
+
+    if waypoint.road_id in ROADS and (waypoint.lane_id == -1 or waypoint.lane_id == -2 or waypoint.lane_id == -3):
         return True
 
     return False
@@ -68,13 +71,28 @@ def get_lane_center(map,location):
     #     print(lane_center.road_id,lane_center.lane_id,test.road_id,
     #         test.lane_id,test_l.road_id,test_l.lane_id,
     #         lane_center.transform.location,test_l.transform.location,sep='\t')
-    lane_center=map.get_waypoint(location,project_to_road=True)
-    if lane_center.is_junction:
-        """If ego vehicle is in junction, to avoid bug in get_waypoint function,
-        first project ego vehicle location to the road shoulder lane, then get the straight lane waypoint
-        according to the relative location between shoulder lane and current driving lane"""
-        shoulder = map.get_waypoint(location, project_to_road=True,lane_type=carla.LaneType.Shoulder)
-        lane_center = shoulder.get_left_lane()
+    # lane_center=map.get_waypoint(location,project_to_road=True)
+    # if lane_center.is_junction:
+    #     """If ego vehicle is in junction, to avoid bug in get_waypoint function,
+    #     first project the ego vehicle location to the road shoulder lane, then get the straight lane waypoint
+    #     according to the relative location between shoulder lane and current driving lane"""
+    #     shoulder = map.get_waypoint(location, project_to_road=True,lane_type=carla.LaneType.Shoulder)
+    #     lane_center = shoulder.get_left_lane()
+
+    lane_center = map.get_waypoint(location, project_to_road=True)
+    road_id = lane_center.road_id
+    in_road = road_id in ROADS
+    if not in_road:
+        """
+            if ego vehicle not in the specific roads, we first get the right waypoint of lanecenter
+            and then get the left waypoint of the right waypoint
+            finally, check lanecenter whether is in lane -1
+            if != -1, it indicate lanecenter in shoulder, thus get the right waypoint
+        """
+        right = lane_center.get_right_lane()
+        lane_center = right.get_left_lane()
+        if lane_center.lane_id != -1:
+            lane_center = lane_center.get_right_lane()
 
     return lane_center
 
@@ -232,27 +250,58 @@ def is_within_distance(target_transform, reference_transform, max_distance, angl
     return min_angle < angle < max_angle
 
 
-def is_within_distance_ahead(target_location, current_location, orientation, max_distance):
+def is_within_distance_ahead(target_location, current_location, current_transform, max_distance):
     """
-  Check if a target object is within a certain distance in front of a reference object.
+      Check if a target object is within a certain distance in front of a reference object.
 
-  :param target_location: location of the target object
-  :param current_location: location of the reference object
-  :param orientation: orientation of the reference object
-  :param max_distance: maximum allowed distance
-  :return: True if target object is within max_distance ahead of the reference object
-  """
+      :param target_location: location of the target object
+      :param current_location: location of the reference object
+      :param current_transform: transform of the reference object
+      :param max_distance: maximum allowed distance
+      :return: True if target object is within max_distance ahead of the reference object
+    """
     target_vector = np.array([target_location.x - current_location.x, target_location.y - current_location.y])
     norm_target = np.linalg.norm(target_vector)
+    if norm_target < 0.001:
+        return True
     if norm_target > max_distance:
         return False
 
-    forward_vector = np.array(
-        [math.cos(math.radians(orientation)), math.sin(math.radians(orientation))])
+    # forward_vector = np.array(
+    #     [math.cos(math.radians(orientation)), math.sin(math.radians(orientation))])
+    fwd = current_transform.get_forward_vector()
+    forward_vector = np.array([fwd.x, fwd.y])
     d_angle = math.degrees(math.acos(
-        np.clip(np.dot(forward_vector, target_vector) / norm_target,-1,1)))
+        np.clip(np.dot(forward_vector, target_vector) / norm_target, -1, 1)))
 
-    return d_angle < 90.0
+    return 0.0 < d_angle < 90.0
+
+
+def is_within_distance_rear(target_location, current_location, current_transform, max_distance):
+    """
+      Check if a target object is within a certain distance in front of a reference object.
+
+      :param target_location: location of the target object
+      :param current_location: location of the reference object
+      :param current_transform: transform of the reference object
+      :param max_distance: maximum allowed distance
+      :return: True if target object is within max_distance ahead of the reference object
+    """
+    target_vector = np.array([target_location.x - current_location.x, target_location.y - current_location.y])
+    norm_target = np.linalg.norm(target_vector)
+    if norm_target < 0.001:
+        return True
+    if norm_target > max_distance:
+        return False
+
+    # forward_vector = np.array(
+    #     [math.cos(math.radians(orientation)), math.sin(math.radians(orientation))])
+    fwd = current_transform.get_forward_vector()
+    forward_vector = np.array([fwd.x, fwd.y])
+    d_angle = math.degrees(math.acos(
+        np.clip(np.dot(forward_vector, target_vector) / norm_target, -1, 1)))
+
+    return 90.0 < d_angle < 180.0
 
 
 def compute_magnitude_angle(target_location, current_location, orientation):

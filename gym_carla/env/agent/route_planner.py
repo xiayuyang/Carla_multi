@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 from enum import Enum
 from collections import deque
 from shapely.geometry import Polygon
-from gym_carla.env.settings import ROADS, STRAIGHT, CURVE, JUNCTION
+from gym_carla.env.settings import ROADS, STRAIGHT, CURVE, JUNCTION, DOUBLE_DIRECTION, DISTURB_ROADS
 from gym_carla.env.util.misc import get_lane_center, get_speed, vector, compute_magnitude_angle, \
-    is_within_distance_ahead, draw_waypoints, compute_distance, is_within_distance, test_waypoint
+    is_within_distance_ahead, is_within_distance_rear, draw_waypoints, compute_distance, is_within_distance, test_waypoint
 
 
 class RoadOption(Enum):
@@ -30,6 +30,8 @@ class GlobalPlanner:
     """
     class for generating chosen circuit's road topology,topology is saved with waypoints list
     vehicle always runs on the outer ring of chosen route
+
+    temporarily used to get more spawnpoints
     """
 
     def __init__(self, map, sampling_resolution=1000.0) -> None:
@@ -55,10 +57,10 @@ class GlobalPlanner:
         return self._compute_next_waypoints(ego_waypoint, len(self._route))
 
     def get_spawn_points(self):
-        """Vehicle can only be spawned on straight road, return transforms"""
+        """Vehicle can only be spawned on specific roads, return transforms"""
         spawn_points = []
         for wp in self._route:
-            if wp.road_id in STRAIGHT:
+            if wp.road_id in STRAIGHT or wp.road_id in CURVE:
                 temp = carla.Transform(wp.transform.location, wp.transform.rotation)
                 # Increase the z value a little bit to avoid collison upon initializing
                 temp.location.z += 0.1
@@ -219,11 +221,15 @@ class GlobalPlanner:
 
 
 class LocalPlanner:
-    def __init__(self, vehicle, opt_dict={
-       'sampling_resolution':4.0,
-       'buffer_size':10,
-       'vehicle_proximity':50
-    }):
+    def __init__(self, vehicle, opt_dict=None):
+        if opt_dict is None:
+            opt_dict = {'sampling_resolution': 4.0,
+                        'buffer_size': 10,
+                        'vehicle_proximity': 50
+                        }
+        """
+            temporarily used to get front waypoints and vehicle
+        """
         self._vehicle = vehicle
         self._world = self._vehicle.get_world()
         self._map = self._world.get_map()
@@ -327,7 +333,7 @@ class LocalPlanner:
                     next_waypoints, last_waypoint)
 
                 # # random choice between the possible options
-                # road_option = road_options_list[1]  
+                # road_option = road_options_list[1]
                 # #road_option = random.choice(road_options_list)
                 # next_waypoint = next_waypoints[road_options_list.index(road_option)]
 
@@ -342,7 +348,7 @@ class LocalPlanner:
 
     def _get_waypoints(self):
         """Get the next waypoint list according to ego vehicle's current location"""
-        lane_center=get_lane_center(self._map,self._vehicle.get_location())
+        lane_center= get_lane_center(self._map, self._vehicle.get_location())
         _waypoints_queue = deque(maxlen=600)
         _waypoints_queue.append(lane_center)
         available_entries = _waypoints_queue.maxlen - len(self._waypoints_queue)
@@ -370,8 +376,64 @@ class LocalPlanner:
                 #road_option = road_options_list[idx]
 
             _waypoints_queue.append(next_waypoint)
+        # delete an element from the left
         _waypoints_queue.popleft()
         return _waypoints_queue
+
+    def get_waypoint_one_lane(self, buffer_size, waypoint=None):
+        _waypoints_queue = deque(maxlen=600)
+        if waypoint is not None:
+            _waypoints_queue.append(waypoint)
+            available_entries = _waypoints_queue.maxlen - len(self._waypoints_queue)
+            k = min(available_entries, buffer_size)
+            for _ in range(k):
+                last_waypoint = _waypoints_queue[-1]
+                next_waypoints = list(last_waypoint.next(self._sampling_radius))
+
+                if len(next_waypoints) == 0:
+                    break
+                elif len(next_waypoints) == 1:
+                    # only one option available ==> lanefollowing
+                    next_waypoint = next_waypoints[0]
+                    # road_option = RoadOption.LANEFOLLOW
+                else:
+                    # road_options_list = self._retrieve_options(
+                    #     next_waypoints, last_waypoint)
+
+                    idx = None
+                    for i, wp in enumerate(next_waypoints):
+                        if wp.road_id in ROADS:
+                            next_waypoint = wp
+                            idx = i
+                    # road_option = road_options_list[idx]
+
+                _waypoints_queue.append(next_waypoint)
+            # delete an element from the left
+            _waypoints_queue.popleft()
+        return _waypoints_queue
+
+    def _get_waypoints_multilane(self):
+        """
+        :return: front waypoints (self._buffer_size) in three lanes
+        """
+        lane_center = get_lane_center(self._map, self._vehicle.get_location())
+        lane_id = lane_center.lane_id
+        left = None
+        center = None
+        right = None
+        if lane_id == -1:
+            center = lane_center
+            right = lane_center.get_right_lane()
+        elif lane_id == -2:
+            left = lane_center.get_left_lane()
+            center = lane_center
+            right = lane_center.get_right_lane()
+        elif lane_id == -3:
+            left = lane_center.get_right_lane()
+            center = lane_center
+
+        return self.get_waypoint_one_lane(self._buffer_size, left), \
+               self.get_waypoint_one_lane(self._buffer_size, center), self.get_waypoint_one_lane(self._buffer_size, right)
 
     # def _get_waypoints(self):
     #     """
@@ -455,14 +517,107 @@ class LocalPlanner:
         lights_list = actor_list.filter("*traffic_light*")
 
         # check possible obstacles
-        vehicle = self._vehicle_hazard(vehicle_list)
+        vehicle = self._get_front_vehicle(vehicle_list)
 
         # check for the state of the traffic lights
         light_state = self._is_light_red_us_style(lights_list)
 
         return light_state, vehicle
 
-    def _vehicle_hazard(self, vehicle_list):
+    def _get_traffic_light(self):
+        """
+        TODO: detected distance of traffic light
+        :return:
+        """
+        actor_list = self._world.get_actors()
+        lights_list = actor_list.filter("*traffic_light*")
+        light_state = self._is_light_red_us_style(lights_list)
+        return light_state
+
+    def _get_front_rear_inlane_vehicle(self):
+        """
+
+        :return: the front vehicle in the same lane
+        the rear vehicle in the same lane
+        detected surrounding vehicles in three lanes
+        """
+        actor_list = self._world.get_actors()
+        vehicle_list = actor_list.filter("*vehicle*")
+
+        # check possible obstacles
+        front_vehicle = self._get_front_vehicle(vehicle_list, 0)
+        rear_vehicle = self._get_rear_vehicle(vehicle_list, 0)
+        in_lane_vehicles = self._get_in_lane_vehicles(vehicle_list)
+
+        return front_vehicle, rear_vehicle, in_lane_vehicles
+
+    def _get_in_lane_vehicles(self, vehicle_list):
+        """
+        :param vehicle_list: list of potential obstacle to check
+        :return: detected surrounding vehicles in three lanes
+        """
+        front_left_vehicle = self._get_front_vehicle(vehicle_list, -1)
+        front_vehicle = self._get_front_vehicle(vehicle_list, 0)
+        front_right_vehicle = self._get_front_vehicle(vehicle_list, 1)
+        rear_left_vehicle = self._get_rear_vehicle(vehicle_list, -1)
+        rear_vehicle = self._get_rear_vehicle(vehicle_list, 0)
+        rear_right_vehicle = self._get_rear_vehicle(vehicle_list, 1)
+        return [front_left_vehicle, front_vehicle, front_right_vehicle, rear_left_vehicle, rear_vehicle, rear_right_vehicle]
+
+    def _get_rear_vehicle(self, vehicle_list, direction=0):
+        """
+        Check if a given vehicle is an obstacle in our way. To this end we take
+        into account the road and lane the target vehicle is on and run a
+        geometry test to check if the target vehicle is under a certain distance
+        behind our ego vehicle.
+
+        WARNING: This method is an approximation that could fail for very large
+        vehicles, which center is actually on a different lane but their
+        extension falls within the ego vehicle lane.
+
+        :param vehicle_list: list of potential obstacle to check
+        :return:
+            - the first rear vehicle
+        """
+
+        ego_vehicle_location = self._vehicle.get_location()
+        ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
+        ego_vehicle_lane_center = get_lane_center(self._map, ego_vehicle_location)
+        min_distance = self._proximity_threshold
+        vehicle_front = None
+        lane_id = ego_vehicle_lane_center.lane_id - direction
+        if lane_id != -1 and lane_id != -2 and lane_id != -3:
+            return vehicle_front
+
+        for target_vehicle in vehicle_list:
+            # do not account for the ego vehicle
+            if target_vehicle.id == self._vehicle.id:
+                continue
+
+            # if the object is not in our lane it's not an obstacle
+            target_vehicle_waypoint = self._map.get_waypoint(target_vehicle.get_location())
+            # check whether in the same road
+            if not test_waypoint(target_vehicle_waypoint):
+                continue
+            # check whether in the specific lane
+            if target_vehicle_waypoint.lane_id != lane_id:
+                continue
+            # if target_vehicle_waypoint.road_id != ego_vehicle_waypoint.road_id or \
+            #         target_vehicle_waypoint.lane_id != ego_vehicle_waypoint.lane_id:
+            #     continue
+
+            loc = target_vehicle.get_location()
+            if is_within_distance_ahead(loc, ego_vehicle_location,
+                                        self._vehicle.get_transform(),
+                                        self._proximity_threshold):
+                if ego_vehicle_location.distance(loc) < min_distance:
+                    # Return the most close vehicel in front of ego vehicle
+                    vehicle_front=target_vehicle
+                    min_distance=ego_vehicle_location.distance(loc)
+
+        return vehicle_front
+
+    def _get_front_vehicle(self, vehicle_list, direction=0):
         """
         Check if a given vehicle is an obstacle in our way. To this end we take
         into account the road and lane the target vehicle is on and run a
@@ -476,12 +631,17 @@ class LocalPlanner:
         :param vehicle_list: list of potential obstacle to check
         :return:
             - vehicle is the blocker object itself
+            - the front vehicle
         """
 
         ego_vehicle_location = self._vehicle.get_location()
         ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
-        min_distance=self._proximity_threshold
-        vehicle_front=None
+        ego_vehicle_lane_center = get_lane_center(self._map, ego_vehicle_location)
+        min_distance = self._proximity_threshold
+        vehicle_rear = None
+        lane_id = ego_vehicle_lane_center.lane_id - direction
+        if lane_id != -1 and lane_id != -2 and lane_id != -3:
+            return vehicle_rear
 
         for target_vehicle in vehicle_list:
             # do not account for the ego vehicle
@@ -490,22 +650,26 @@ class LocalPlanner:
 
             # if the object is not in our lane it's not an obstacle
             target_vehicle_waypoint = self._map.get_waypoint(target_vehicle.get_location())
+            # check whether in the same road
             if not test_waypoint(target_vehicle_waypoint):
+                continue
+            # check whether in the specific lane
+            if target_vehicle_waypoint.lane_id != lane_id:
                 continue
             # if target_vehicle_waypoint.road_id != ego_vehicle_waypoint.road_id or \
             #         target_vehicle_waypoint.lane_id != ego_vehicle_waypoint.lane_id:
             #     continue
 
             loc = target_vehicle.get_location()
-            if is_within_distance_ahead(loc, ego_vehicle_location,
-                                        self._vehicle.get_transform().rotation.yaw,
+            if is_within_distance_rear(loc, ego_vehicle_location,
+                                        self._vehicle.get_transform(),
                                         self._proximity_threshold):
-                if ego_vehicle_location.distance(loc)<min_distance:
+                if ego_vehicle_location.distance(loc) < min_distance:
                     # Return the most close vehicel in front of ego vehicle
-                    vehicle_front=target_vehicle
+                    vehicle_rear=target_vehicle
                     min_distance=ego_vehicle_location.distance(loc)
 
-        return vehicle_front
+        return vehicle_rear
 
     def _is_light_red_us_style(self, lights_list):
         """

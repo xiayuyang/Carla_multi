@@ -47,6 +47,7 @@ class CarlaEnv:
         self.min_distance=args.min_distance
         self.vehicle_proximity = args.vehicle_proximity
         self.hybrid = args.hybrid
+        self.auto_lanechange = args.auto_lane_change
         self.stride = args.stride
         self.buffer_size = args.buffer_size
         self.pre_train_steps = args.pre_train_steps
@@ -85,6 +86,10 @@ class CarlaEnv:
         self.TM_switch = False
         self.SWITCH_THRESHOLD = args.switch_threshold
         self.next_wps = None  # ego vehicle's following waypoint list
+        self.left_wps = None
+        self.center_wps = None
+        self.right_wps = None
+
 
         # generate ego vehicle spawn points on chosen route
         self.global_planner = GlobalPlanner(self.map, self.sampling_resolution)
@@ -119,6 +124,8 @@ class CarlaEnv:
         self.ego_vehicle = None
         # the vehicle in front of ego vehicle
         self.vehicle_front = None
+        self.vehicle_rear = None
+        self.vehicle_inlane = None
 
         # Collision sensor
         self.collision_sensor = None
@@ -191,28 +198,27 @@ class CarlaEnv:
         # self.ego_vehicle.get_location()
 
         # add route planner for ego vehicle
-        self.local_planner = LocalPlanner(self.ego_vehicle, 
-            {'sampling_resolution':self.sampling_resolution,
-            'buffer_size':self.buffer_size,
-            'vehicle_proximity':self.vehicle_proximity})
+        self.local_planner = LocalPlanner(self.ego_vehicle, {'sampling_resolution': self.sampling_resolution,
+                                                             'buffer_size': self.buffer_size,
+                                                             'vehicle_proximity': self.vehicle_proximity})
         # self.local_planner.set_global_plan(self.global_planner.get_route(
         #      self.map.get_waypoint(self.ego_vehicle.get_location())))
-        self.next_wps, _, self.vehicle_front = self.local_planner.run_step()
+        self.next_wps, o1, o2 = self.local_planner.run_step()
+        self.left_wps, self.center_wps, self.right_wps = self.local_planner._get_waypoints_multilane()
+        self.vehicle_front, self.vehicle_rear, self.vehicle_inlane = self.local_planner._get_front_rear_inlane_vehicle()
 
         # set ego vehicle controller
         self._ego_autopilot(True)
 
-        # Only use RL controller after ego vehicle speed reach 10 m/s
+        # Only use RL controller after ego vehicle speed reach speed_threshold
         self.speed_state = SpeedState.START
         # self.controller = BasicAgent(self.ego_vehicle, {'target_speed': self.speed_threshold, 'dt': 1 / self.fps,
         #                                                 'max_throttle': self.throttle_bound,
         #                                                 'max_brake': self.brake_bound})
-        self.autopilot_controller=BasicAgent(self.ego_vehicle,target_speed=30,
-            opt_dict={'ignore_traffic_lights':True,'ignore_stop_signs':True,
-            'sampling_resolution':self.sampling_resolution,'dt':1.0/self.fps,
-            'sampling_radius':self.sampling_resolution,'max_steering':self.steer_bound,
-            'max_throttle':self.throttle_bound,'max_brake':self.brake_bound,
-            'ignore_vehicles':random.choice([True,False])})
+        self.autopilot_controller = BasicAgent(self.ego_vehicle, target_speed=30, opt_dict={'ignore_traffic_lights': True,
+        'ignore_stop_signs': True, 'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
+        'sampling_radius': self.sampling_resolution, 'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,
+        'max_brake': self.brake_bound, 'ignore_front_vehicles': random.choice([True, False]), 'ignore_change_gap': random.choice([True, False])})
         # self.control_sigma={'Steer':random.choice([0.3, 0.4, 0.5]),
         #                 'Throttle_brake':random.choice([0.4,0.5,0.6])}
         self.control_sigma={'Steer':random.choice([0,0,0.05,0.1,0.15,0.2,0.25]),
@@ -223,7 +229,7 @@ class CarlaEnv:
         camera_transform = carla.Transform(carla.Location(x=1.5, z=2.4))
         self.camera = self.world.spawn_actor(camera_bp, camera_transform, attach_to=self.ego_vehicle)
         self.camera.listen(lambda image: self._sensor_callback(image, self.sensor_queue))
-        # 
+        #
 
         # speed state switch
         if not self.debug:
@@ -268,9 +274,11 @@ class CarlaEnv:
         return self._get_state({'waypoints': self.next_wps, 'vehicle_front': self.vehicle_front})
 
     def step(self, action):
+        self.autopilot_controller.set_info({'left_wps': self.left_wps, 'center_wps': self.center_wps,
+                                            'right_wps': self.right_wps, 'vehicle_inlane': self.vehicle_inlane})
         self.step_info=None
         self.next_wps=None
-        #self.vehicle_front=None
+        self.vehicle_front=None
         """throttle (float):A scalar value to control the vehicle throttle [0.0, 1.0]. Default is 0.0.
                 steer (float):A scalar value to control the vehicle steering [-1.0, 1.0]. Default is 0.0.
                 brake (float):A scalar value to control the vehicle brake [0.0, 1.0]. Default is 0.0."""
@@ -290,17 +298,17 @@ class CarlaEnv:
         #     throttle = self.throttle_brake
         if action[0][1] >= 0:
             brake = 0
-            throttle = np.clip(action[0][1], 0 ,self.throttle_bound)
+            throttle = np.clip(action[0][1], 0, self.throttle_bound)
         else:
             throttle = 0
-            brake = np.clip(abs(action[0][1]), 0 , self.brake_bound)
+            brake = np.clip(abs(action[0][1]), 0, self.brake_bound)
 
         # control = carla.VehicleControl(steer=float(steer), throttle=float(throttle), brake=float(brake),hand_brake=False,
         #                                reverse=False,manual_gear_shift=True,gear=1)
         control = carla.VehicleControl(steer=float(steer), throttle=float(throttle), brake=float(brake))
 
-        # Only use RL controller after ego vehicle speed reach 10 m/s
-        # Use DFA to caaulate different speed state transition
+        # Only use RL controller after ego vehicle speed reach speed_threshold
+        # Use DFA to calculate different speed state transition
         if not self.debug:
             control = self._speed_switch(control)
         else:
@@ -311,7 +319,7 @@ class CarlaEnv:
         if self.sync:
             if not self.debug:
                 if not self.RL_switch and not self.TM_switch:
-                    #Add noise to autopilot controller's control command
+                    # Add noise to autopilot controller's control command
                     print(f"Basic Agent Control Before Noise:{control}")
                     control.steer=np.clip(np.random.normal(control.steer,self.control_sigma['Steer']),-self.steer_bound,self.steer_bound)
                     if control.throttle>0:
@@ -352,10 +360,13 @@ class CarlaEnv:
             # print()
             # if self.is_effective_action():
             control = self.ego_vehicle.get_control()
-            print(control)
+            print("real control", control)
             # print(self.ego_vehicle.get_speed_limit(),get_speed(self.ego_vehicle,False),get_acceleration(self.ego_vehicle,False),sep='\t')
             # route planner
-            self.next_wps, _, self.vehicle_front = self.local_planner.run_step()
+            # self.next_wps, _, self.vehicle_front = self.local_planner.run_step()
+            self.next_wps, o1, o2 = self.local_planner.run_step()
+            self.left_wps, self.center_wps, self.right_wps = self.local_planner._get_waypoints_multilane()
+            self.vehicle_front, self.vehicle_rear, self.vehicle_inlane = self.local_planner._get_front_rear_inlane_vehicle()
 
             if self.debug:
                 # run the ego vehicle with PID_controller
@@ -403,7 +414,7 @@ class CarlaEnv:
             control_info = {'Steer': control.steer, 'Throttle': control.throttle, 'Brake': control.brake}
             print(f"Ego Vehicle Speed Limit:{self.ego_vehicle.get_speed_limit() * 3.6}\n"
                   f"Episode:{self.reset_step}, Total_step:{self.total_step}, Time_step:{self.time_step}, RL_control_step:{self.rl_control_step}, \n"
-                  f"Vel: {get_speed(self.ego_vehicle, False)}, Acc:{get_acceleration(self.ego_vehicle, False)}, distance:{state['vehicle_front'][0] * self.sampling_resolution * self.buffer_size}, \n"
+                  f"Vel: {get_speed(self.ego_vehicle, False)}, Acc:{get_acceleration(self.ego_vehicle, False)}, distance:{state['vehicle_front'][0] * self.vehicle_proximity}, \n"
                   f"Reward:{self.step_info['Reward']}, TTC:{self.step_info['TTC']}, Comfort:{self.step_info['Comfort']}, "
                   f"Efficiency:{self.step_info['Efficiency']}, Lane_center:{self.step_info['Lane_center']}, Yaw:{self.step_info['Yaw']} \n"
                   f"Steer:{control_info['Steer']}, Throttle:{control_info['Throttle']}, Brake:{control_info['Brake']}")
@@ -466,10 +477,10 @@ class CarlaEnv:
             vf_speed = get_speed(vehicle_front, False)
             rel_speed = ego_speed - vf_speed
             distance = self.ego_vehicle.get_location().distance(vehicle_front.get_location())
-            vehicle_len=max(abs(self.ego_vehicle.bounding_box.extent.x),abs(self.ego_vehicle.bounding_box.extent.y))+ \
-                max(abs(self.vehicle_front.bounding_box.extent.x),abs(self.vehicle_front.bounding_box.extent.y))
+            vehicle_len = max(abs(self.ego_vehicle.bounding_box.extent.x), abs(self.ego_vehicle.bounding_box.extent.y))+ \
+                max(abs(self.vehicle_front.bounding_box.extent.x), abs(self.vehicle_front.bounding_box.extent.y))
             distance -= vehicle_len
-            if distance <self.min_distance:
+            if distance < self.min_distance:
                 vfl=[0, rel_speed/5]
             else:
                 distance -= self.min_distance
@@ -483,7 +494,7 @@ class CarlaEnv:
         right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
         t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
 
-        yaw_diff_ego=math.degrees(get_yaw_diff(lane_center.transform.get_forward_vector(),
+        yaw_diff_ego = math.degrees(get_yaw_diff(lane_center.transform.get_forward_vector(),
                                                self.ego_vehicle.get_transform().get_forward_vector()))
 
         yaw_forward = lane_center.transform.get_forward_vector()
@@ -508,7 +519,7 @@ class CarlaEnv:
         """Calculate the step reward:
         TTC: Time to collide with front vehicle
         Eff: Ego vehicle efficiency, speed ralated
-        Com: Ego vehicle comfort, ego vehicle acceration change rate 
+        Com: Ego vehicle comfort, ego vehicle acceration change rate
         Lcen: Distance between ego vehicle location and lane center
         """
         ego_speed = get_speed(self.ego_vehicle, True)
@@ -601,20 +612,15 @@ class CarlaEnv:
                         #Under basic agent control
                         self._ego_autopilot(False)
                         self.autopilot_controller.set_destination(random.choice(self.spawn_points).location)
-                        control=self.autopilot_controller.run_step()
+                        control = self.autopilot_controller.run_step()
                 else:
                     self._ego_autopilot(False)
         elif self.speed_state == SpeedState.RUNNING:
             if self.RL_switch == True:
-                if ego_speed < self.speed_min and self.vehicle_front:
-                    distance = self.ego_vehicle.get_location().distance(self.vehicle_front.get_location())
-                    vehicle_len=max(abs(self.ego_vehicle.bounding_box.extent.x),abs(self.ego_vehicle.bounding_box.extent.y))+ \
-                        max(abs(self.vehicle_front.bounding_box.extent.x),abs(self.vehicle_front.bounding_box.extent.y))
-                    distance -= vehicle_len
-                    if distance<self.min_distance+1:
-                        #Ego vehicle following front vehicle
-                        self.speed_state = SpeedState.REBOOT
+                if ego_speed < self.speed_min:
+                    # Only add reboot state in the beginning 200 episodes
                     # self._ego_autopilot(True)
+                    #self.speed_state = SpeedState.REBOOT
                     pass
                 pass
             else:
@@ -627,7 +633,7 @@ class CarlaEnv:
                         self.autopilot_controller.set_destination(random.choice(self.spawn_points).location)
                     control=self.autopilot_controller.run_step()
         elif self.speed_state == SpeedState.REBOOT:
-            #control = self.controller.run_step({'waypoints': self.next_wps, 'vehicle_front': self.vehicle_front})
+            control = self.controller.run_step({'waypoints': self.next_wps, 'vehicle_front': self.vehicle_front})
             if ego_speed >= self.speed_threshold:
                 # self._ego_autopilot(False)
                 self.speed_state = SpeedState.RUNNING
@@ -645,7 +651,7 @@ class CarlaEnv:
         if self.map.get_waypoint(self.ego_vehicle.get_location()) is None:
             logging.warn('vehicle drive out of road')
             return True
-        if get_speed(self.ego_vehicle, False) < self.speed_min and self.speed_state == SpeedState.RUNNING:
+        if get_speed(self.ego_vehicle, False) < 0.00001 and self.speed_state != SpeedState.START:
             logging.warn('vehicle speed too low')
             return True
         # if self.lane_invasion_sensor.get_invasion_count()!=0:
@@ -671,7 +677,7 @@ class CarlaEnv:
             if self.next_wps[2].transform.location.distance(
                     self.ego_spawn_point.location) < self.sampling_resolution:
                 # The second next waypoints is close enough to the spawn point, route done
-                logging.info('vehicle reach destination, simulation terminate')
+                logging.info('vehicle reach destination under basic agent, simulation terminate')
                 return True
 
         return False
@@ -697,6 +703,11 @@ class CarlaEnv:
             self.traffic_manager.ignore_vehicles_percentage(self.ego_vehicle, 0)
             self.traffic_manager.ignore_walkers_percentage(self.ego_vehicle, 100)
             self.traffic_manager.vehicle_percentage_speed_difference(self.ego_vehicle, speed_diff)
+            if self.auto_lanechange:
+                self.traffic_manager.auto_lane_change(self.ego_vehicle, True)
+                self.traffic_manager.random_left_lanechange_percentage(self.ego_vehicle, 100)
+                self.traffic_manager.random_right_lanechange_percentage(self.ego_vehicle, 100)
+
 
             # self.traffic_manager.set_desired_speed(self.ego_vehicle,36)
             # ego_wp=self.map.get_waypoint(self.ego_vehicle.get_location())
@@ -776,12 +787,13 @@ class CarlaEnv:
 
         """The default global speed limit is 30 m/s
         Vehicles' target speed is 70% of their current speed limit unless any other value is set."""
+        speed_diff = (30 * 3.6 - (self.speed_limit+1)) / (30 * 3.6) * 100
         # Let the companion vehicles drive a bit faster than ego speed limit
-        #self.traffic_manager.global_percentage_speed_difference(0)
+        self.traffic_manager.global_percentage_speed_difference(0)
         self.traffic_manager.set_synchronous_mode(self.sync)
 
     def _try_spawn_ego_vehicle_at(self, transform):
-        """Try to spawn a  vehicle at specific transform 
+        """Try to spawn a  vehicle at specific transform
         Args:
             transform: the carla transform object.
 
@@ -847,6 +859,7 @@ class CarlaEnv:
             # print(transform)
             blueprint = self._create_vehicle_blueprint('vehicle.audi.etron', number_of_wheels=[4])
             # Spawn the cars and their autopilot all together
+            # Spawn the cars and their autopilot all together
             command_batch.append(SpawnActor(blueprint, transform).
                                  then(SetAutopilot(FutureActor, True, self.tm_port)))
 
@@ -858,17 +871,17 @@ class CarlaEnv:
                 # print("Future Actor",response.actor_id)
                 self.companion_vehicles.append(self.world.get_actor(response.actor_id))
                 self.traffic_manager.ignore_lights_percentage(
-                    self.world.get_actor(response.actor_id), 50)
+                    self.world.get_actor(response.actor_id), 100)
+                self.traffic_manager.auto_lane_change(
+                    self.world.get_actor(response.actor_id), True)
                 self.traffic_manager.ignore_signs_percentage(
-                    self.world.get_actor(response.actor_id), 50)
+                    self.world.get_actor(response.actor_id), 100)
                 self.traffic_manager.ignore_walkers_percentage(
                     self.world.get_actor(response.actor_id), 100)
                 self.traffic_manager.set_route(self.world.get_actor(response.actor_id),
                                                ['Straight', 'Straight', 'Straight', 'Straight', 'Straight'])
                 self.traffic_manager.update_vehicle_lights(
                     self.world.get_actor(response.actor_id),True)
-                self.traffic_manager.vehicle_percentage_speed_difference(
-                    self.world.get_actor(response.actor_id), -0)
                 # print(self.world.get_actor(response.actor_id).attributes)
 
         msg = 'requested %d vehicles, generate %d vehicles, press Ctrl+C to exit.'

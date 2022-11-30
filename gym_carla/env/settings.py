@@ -1,17 +1,20 @@
 """This file defines all high level parameters of carla gym environment"""
 import argparse
 
-CARLA_PATH = 'D:\ProgramFiles\Carla\WindowsNoEditor'
+CARLA_PATH = 'D:\WindowsNoEditor'
 # the following road id sets define the chosen route
 ROADS = set()
-STRAIGHT = {8, 0, 1, 2, 3, 15, 5, 6, 7}
-CURVE = {11, 13, 20, 14}
-JUNCTION = {40, 41, 61, 62, 117, 118, 93, 94, 157, 158}
+DISTURB_ROADS = set()
+STRAIGHT = {12, 35, 36}
+CURVE = {37, 38, 34}
+JUNCTION = {2344, 2035}
+DOUBLE_DIRECTION = {2358, 2363, 2039, 2052}
 # JUNCTION_LANE={33,85,141}
 # JUNCTION_LANE_MINUS={102,109,150,163,46,67,128}
 ROADS.update(STRAIGHT)
 ROADS.update(CURVE)
 ROADS.update(JUNCTION)
+DISTURB_ROADS.update(DOUBLE_DIRECTION)
 
 # the flowing arguments set the simulation parameters
 ARGS = argparse.ArgumentParser(
@@ -81,13 +84,13 @@ ARGS.add_argument(
     type=int)
 ARGS.add_argument(
     '-m', '--map', type=str,
-    choices=['Town01_Opt', 'Town02_Opt'],
+    choices=['Town05_Opt', 'Town05_Opt'],
     help='Choose one of the possible world maps',
     default='Town01_Opt')
 ARGS.add_argument(
     '-n', '--num_of_vehicles', type=list,
     help='Total vehicles number which run in simulation',
-    default=[5,10,15,20])
+    default=[10,20])
 ARGS.add_argument(
     '-sa', '--sampling_resolution', type=float,
     help='Distance between generated two waypoints',
@@ -104,6 +107,11 @@ ARGS.add_argument(
     default=True,
     help='Activate hybrid mode for Traffic Manager')
 ARGS.add_argument(
+    '--auto_lane_change',
+    action='store_true',
+    default=True,
+    help='set lane change behaviors for Traffic Manager')
+ARGS.add_argument(
     '--no_rendering',
     action='store_true',
     default=False,
@@ -114,7 +122,7 @@ ARGS.add_argument(
     help='The number of upfront waypoints each state should include')
 ARGS.add_argument(
     '--buffer-size', type=int,
-    default=30,
+    default=20,
     help='The number of look-ahead waypoints in each step')
 ARGS.add_argument(
     '--TTC_th', type=float,
@@ -130,11 +138,11 @@ ARGS.add_argument(
     help='Speed limit for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_threshold', type=float,
-    default=10.0,
+    default=20.0,
     help='Speed limit for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_min', type=float,
-    default=0.01,
+    default=3.6,
     help='When ego vehicle speed reaches down to this threshold, we should let basic agent take control \
         and the action of basic need to add into the replay buffer, km/h')
 ARGS.add_argument(
@@ -152,7 +160,7 @@ ARGS.add_argument(
 ARGS.add_argument(
     '--switch_threshold', type=int,
     default=20,
-    help='Let the RL controller and PID controller alternatively take control every 500 steps'
+    help='Let the TM controller control 1 episode after basic_agent controller control switch_threshold episodes'
 )
 ARGS.add_argument(
     '--pre_train_steps', type=int,
@@ -161,7 +169,7 @@ ARGS.add_argument(
 )
 ARGS.add_argument(
     '--vehicle_proximity',type=float,
-    default=30.0,
+    default=20.0,
     help='Distance for searching vehicles in front of ego vehicle, unit -- meters'
 )
 ARGS.add_argument(

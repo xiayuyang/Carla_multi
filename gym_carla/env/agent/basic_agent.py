@@ -80,7 +80,7 @@ class BasicAgent(object):
             args_longitudinal=self._args_longitudinal_dict,offset=self._offset,max_throttle=self._max_throt,
             max_brake=self._max_brake,max_steering=self._max_steer)
 
-    def run_step(self,road_info):
+    def run_step(self, road_info):
         """Execute one step of navigation."""
         # hazard_detected = False
 
@@ -104,7 +104,7 @@ class BasicAgent(object):
         #     hazard_detected = True
 
         if self.follow_speed_limits:
-            self._target_speed=self._vehicle.get_speed_limit()
+            self._target_speed = self._vehicle.get_speed_limit()
 
         if road_info['waypoints'] is None:
             #Stop if no target waypoint
@@ -114,10 +114,10 @@ class BasicAgent(object):
             control.brake=1.0
             control.hand_brake=False
             control.manual_gear_shift=False
-        elif road_info['vehicle_front'] :
+        elif road_info['vehicle_front']:
             control=self.emergency_stop()
         else:
-            control = self._vehicle_controller.run_step(self._target_speed,road_info['waypoints'][0])
+            control = self._vehicle_controller.run_step(self._target_speed, road_info['waypoints'][0])
 
         return control
 

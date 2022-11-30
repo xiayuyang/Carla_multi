@@ -15,7 +15,7 @@ from shapely.geometry import Polygon
 
 from gym_carla.env.carla.local_planner import LocalPlanner
 from gym_carla.env.carla.global_route_planner import GlobalRoutePlanner
-from gym_carla.env.util.misc import get_speed, is_within_distance, get_trafficlight_trigger_location, compute_distance
+from gym_carla.env.util.misc import get_speed, is_within_distance, get_trafficlight_trigger_location, compute_distance, get_lane_center
 
 
 class BasicAgent(object):
@@ -48,7 +48,12 @@ class BasicAgent(object):
         self._sampling_resolution = 2.0
         self._base_tlight_threshold = 5.0  # meters
         self._base_vehicle_threshold = 5.0  # meters
-        self._max_brake = 0.5
+
+        # set by carla_env.py
+        self.left_wps = None
+        self.center_wps = None
+        self.right_wps = None
+        self.vehicle_inlane = None
 
         # Change parameters according to the dictionary
         opt_dict['target_speed'] = target_speed
@@ -64,12 +69,17 @@ class BasicAgent(object):
             self._base_tlight_threshold = opt_dict['base_tlight_threshold']
         if 'base_vehicle_threshold' in opt_dict:
             self._base_vehicle_threshold = opt_dict['base_vehicle_threshold']
+        if 'max_steering' in opt_dict:
+            self._max_steering = opt_dict['max_steering']
+        if 'max_throttle' in opt_dict:
+            self._max_throttle = opt_dict['max_throttle']
         if 'max_brake' in opt_dict:
-            self._max_steering = opt_dict['max_brake']
+            self._max_brake = opt_dict['max_brake']
 
         # Initialize the planners
         self._local_planner = LocalPlanner(self._vehicle, opt_dict=opt_dict)
         self._global_planner = GlobalRoutePlanner(self._map, self._sampling_resolution)
+
 
     def add_emergency_stop(self, control):
         """
@@ -268,8 +278,8 @@ class BasicAgent(object):
             max_distance = self._base_vehicle_threshold
 
         ego_transform = self._vehicle.get_transform()
-        ego_wpt = self._map.get_waypoint(self._vehicle.get_location())
-
+        # ego_wpt = self._map.get_waypoint(self._vehicle.get_location())
+        ego_wpt = get_lane_center(self._map, self._vehicle.get_location())
         # Get the right offset
         if ego_wpt.lane_id < 0 and lane_offset != 0:
             lane_offset *= -1
