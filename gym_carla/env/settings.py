@@ -84,13 +84,13 @@ ARGS.add_argument(
     type=int)
 ARGS.add_argument(
     '-m', '--map', type=str,
-    choices=['Town05_Opt', 'Town05_Opt'],
+    choices=['Town05', 'Town05_Opt'],
     help='Choose one of the possible world maps',
-    default='Town01_Opt')
+    default='Town05_Opt')
 ARGS.add_argument(
     '-n', '--num_of_vehicles', type=list,
     help='Total vehicles number which run in simulation',
-    default=[10,20])
+    default=[20*3, 25*3, 30*3, 35*3])
 ARGS.add_argument(
     '-sa', '--sampling_resolution', type=float,
     help='Distance between generated two waypoints',
@@ -122,7 +122,7 @@ ARGS.add_argument(
     help='The number of upfront waypoints each state should include')
 ARGS.add_argument(
     '--buffer-size', type=int,
-    default=20,
+    default=50,
     help='The number of look-ahead waypoints in each step')
 ARGS.add_argument(
     '--TTC_th', type=float,
@@ -133,13 +133,17 @@ ARGS.add_argument(
     default=20,
     help='reward penalty for simulation terminated early on account of collision and lane invasion')
 ARGS.add_argument(
+    '--lane_change_reward', type=float,
+    default=20,
+    help='reward for lane change according to the distance to the preceding vehicle')
+ARGS.add_argument(
     '--speed_limit', type=float,
-    default=72.0,
+    default=96.0,
     help='Speed limit for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_threshold', type=float,
     default=20.0,
-    help='Speed limit for ego vehicle, km/h')
+    help='Speed threshold for ego vehicle, start phase for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_min', type=float,
     default=3.6,
@@ -164,12 +168,12 @@ ARGS.add_argument(
 )
 ARGS.add_argument(
     '--pre_train_steps', type=int,
-    default=10000,
+    default=100000,
     help='Let the RL controller and PID controller alternatively take control every 500 steps'
 )
 ARGS.add_argument(
     '--vehicle_proximity',type=float,
-    default=20.0,
+    default=50.0,
     help='Distance for searching vehicles in front of ego vehicle, unit -- meters'
 )
 ARGS.add_argument(

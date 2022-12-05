@@ -90,11 +90,15 @@ def main():
                                 else:
                                     # Input the agent action to replay buffer
                                     agent.replay_buffer.add(state, action, reward, next_state, truncated, done, info)
-                                print(f"state -- vehicle_front:{state['vehicle_front']}\n"
-                                      f"waypoints:{state['waypoints']}, \n"
+                                print(f"state -- vehicle_info:{state['vehicle_info']}\n"
+                                      f"waypoints:{state['left_waypoints']}, \n"
+                                      f"waypoints:{state['center_waypoints']}, \n"
+                                      f"waypoints:{state['right_waypoints']}, \n"
                                       f"ego_vehicle:{state['ego_vehicle']}, \n"
-                                      f"next_state -- vehicle_front:{next_state['vehicle_front']}\n"
-                                      f"waypoints:{next_state['waypoints']}\n"
+                                      f"next_state -- vehicle_info:{next_state['vehicle_info']}\n"
+                                      f"waypoints:{state['left_waypoints']}, \n"
+                                      f"waypoints:{state['center_waypoints']}, \n"
+                                      f"waypoints:{state['right_waypoints']}, \n"
                                       f"ego_vehicle:{next_state['ego_vehicle']}\n"
                                       f"action:{action}\n"
                                       f"reward:{reward}\n"

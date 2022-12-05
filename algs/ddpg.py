@@ -11,7 +11,7 @@ class ReplayBuffer:
     def __init__(self, capacity) -> None:
         self.buffer = collections.deque(maxlen=capacity)  # 队列，先进先出
         self.number = 0
-        self.all_buffer = np.zeros((1000000, 66), dtype=np.float32)
+        # self.all_buffer = np.zeros((1000000, 66), dtype=np.float32)
         with open('./out/replay_buffer_test.txt', 'w') as f:
             pass
 
@@ -38,7 +38,7 @@ class ReplayBuffer:
             done = 0
         else:
             done = 1
-        self.save_all(state, action, next_state, reward_list, np.array([truncated]), np.array([done]))
+        # self.save_all(state, action, next_state, reward_list, np.array([truncated]), np.array([done]))
         # with open('./out/replay_buffer_test.txt','ab') as f:
         #     np.savetxt(f, state, delimiter=',')
         #     np.savetxt(f, action, delimiter=',')
@@ -79,13 +79,21 @@ class ReplayBuffer:
         return len(self.buffer)
 
     def _compress(self, state):
-        """return state : waypoints info+ vehicle_front info, shape: 1*22, 
-        first 20 elements are waypoints info, the rest are vehicle info"""
-        wps = np.array(state['waypoints'], dtype=np.float32).reshape((1, -1))
-        ev = np.array(state['ego_vehicle'],dtype=np.float32).reshape((1,-1))
-        vf = np.array(state['vehicle_front'], dtype=np.float32).reshape((1, -1))
-        state_ = np.concatenate((wps, ev, vf), axis=1)
+        # print('state: ', state)
+        state_left_wps = np.array(state['left_waypoints'], dtype=np.float32).reshape((1, -1))
+        state_center_wps = np.array(state['center_waypoints'], dtype=np.float32).reshape((1, -1))
+        state_right_wps = np.array(state['right_waypoints'], dtype=np.float32).reshape((1, -1))
+        state_veh_left_front = np.array(state['vehicle_info'][0], dtype=np.float32).reshape((1, -1))
+        state_veh_front = np.array(state['vehicle_info'][1], dtype=np.float32).reshape((1, -1))
+        state_veh_right_front = np.array(state['vehicle_info'][2], dtype=np.float32).reshape((1, -1))
+        state_veh_left_rear = np.array(state['vehicle_info'][3], dtype=np.float32).reshape((1, -1))
+        state_veh_rear = np.array(state['vehicle_info'][4], dtype=np.float32).reshape((1, -1))
+        state_veh_right_rear = np.array(state['vehicle_info'][5], dtype=np.float32).reshape((1, -1))
+        state_ev = np.array(state['ego_vehicle'], dtype=np.float32).reshape((1, -1))
 
+        state_ = np.concatenate((state_left_wps, state_veh_left_front, state_veh_left_rear,
+                                 state_center_wps, state_veh_front, state_veh_rear,
+                                 state_right_wps, state_veh_right_front, state_veh_right_rear, state_ev), axis=1)
         return state_
 
 class Split_ReplayBuffer:
@@ -347,6 +355,104 @@ class PolicyNet(torch.nn.Module):
 
         return action
 
+class veh_lane_encoder(torch.nn.Module):
+    def __init__(self, state_dim, train=True):
+        super().__init__()
+        self.state_dim = state_dim
+        self.train = train
+        self.lane_encoder = nn.Linear(state_dim['waypoints'], 32)
+        self.veh_encoder = nn.Linear(state_dim['conventional_vehicle'] * 2, 32)
+        self.agg = nn.Linear(64, 64)
+
+    def forward(self, lane_veh):
+        lane = lane_veh[:, :self.state_dim["waypoints"]]
+        veh = lane_veh[:, self.state_dim["waypoints"]:]
+        lane_enc = F.relu(self.lane_encoder(lane))
+        veh_enc = F.relu(self.veh_encoder(veh))
+        state_cat = torch.cat((lane_enc, veh_enc), dim=1)
+        state_enc = F.relu(self.agg(state_cat))
+        return state_enc
+
+
+class PolicyNet_multi(torch.nn.Module):
+    def __init__(self, state_dim, action_bound, train=True) -> None:
+        # the action bound and state_dim here are dicts
+        super().__init__()
+        self.state_dim = state_dim
+        self.action_bound = action_bound
+        self.train = train
+        self.left_encoder = veh_lane_encoder(self.state_dim)
+        self.center_encoder = veh_lane_encoder(self.state_dim)
+        self.right_encoder = veh_lane_encoder(self.state_dim)
+        self.ego_encoder = nn.Linear(self.state_dim['ego_vehicle'], 64)
+        self.fc = nn.Linear(256, 256)
+        self.fc_out = nn.Linear(256, 2)
+        # torch.nn.init.normal_(self.fc1_1.weight.data,0,0.01)
+        # torch.nn.init.normal_(self.fc1_2.weight.data,0,0.01)
+        # torch.nn.init.normal_(self.fc_out.weight.data,0,0.01)
+        # torch.nn.init.normal_(self.fc_out.weight.data,0,0.01)
+        # torch.nn.init.xavier_normal_(self.fc1_1.weight.data)
+        # torch.nn.init.xavier_normal_(self.fc1_2.weight.data)
+        # torch.nn.init.xavier_normal_(self.fc_out.weight.data)
+
+    def forward(self, state):
+        # state: (waypoints + 2 * conventional_vehicle0 * 3
+        one_state_dim = self.state_dim['waypoints'] + self.state_dim['conventional_vehicle'] * 2
+        left_enc = self.left_encoder(state[:, :one_state_dim])
+        center_enc = self.center_encoder(state[:, one_state_dim:2*one_state_dim])
+        right_enc = self.right_encoder(state[:, 2*one_state_dim:3*one_state_dim])
+        ego_enc = self.ego_encoder(state[:, 3*one_state_dim:])
+        state_ = torch.cat((left_enc, center_enc, right_enc, ego_enc), dim=1)
+        hidden = F.relu(self.fc(state_))
+        action = torch.tanh(self.fc_out(hidden))
+        # steer,throttle_brake=torch.split(out,split_size_or_sections=[1,1],dim=1)
+        # steer=steer.clone()
+        # throttle_brake=throttle_brake.clone()
+        # steer*=self.action_bound['steer']
+        # throttle=throttle_brake.clone()
+        # brake=throttle_brake.clone()
+        # for i in range(throttle.shape[0]):
+        #     if throttle[i][0]<0:
+        #         throttle[i][0]=0
+        #     if brake[i][0]>0:
+        #         brake[i][0]=0
+        # throttle*=self.action_bound['throttle']
+        # brake*=self.action_bound['brake']
+
+        return action
+
+
+class QValueNet_multi(torch.nn.Module):
+    def __init__(self, state_dim, action_dim) -> None:
+        # parameter state_dim here is a dict
+        super().__init__()
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.left_encoder = veh_lane_encoder(self.state_dim)
+        self.center_encoder = veh_lane_encoder(self.state_dim)
+        self.right_encoder = veh_lane_encoder(self.state_dim)
+        self.ego_encoder = nn.Linear(self.state_dim['ego_vehicle'], 32)
+        self.action_encoder = nn.Linear(self.action_dim, 32)
+        self.fc = nn.Linear(256, 256)
+        self.fc_out = nn.Linear(256, 1)
+
+        # torch.nn.init.normal_(self.fc1.weight.data,0,0.01)
+        # torch.nn.init.normal_(self.fc_out.weight.data,0,0.01)
+        # torch.nn.init.xavier_normal_(self.fc1.weight.data)
+        # torch.nn.init.xavier_normal_(self.fc_out.weight.data)
+
+    def forward(self, state, action):
+        one_state_dim = self.state_dim['waypoints'] + self.state_dim['conventional_vehicle'] * 2
+        left_enc = self.left_encoder(state[:, :one_state_dim])
+        center_enc = self.center_encoder(state[:, one_state_dim:2*one_state_dim])
+        right_enc = self.right_encoder(state[:, 2*one_state_dim:3*one_state_dim])
+        ego_enc = self.ego_encoder(state[:, 3*one_state_dim:])
+        action_enc = self.action_encoder(action)
+        state_ = torch.cat((left_enc, center_enc, right_enc, ego_enc, action_enc), dim=1)
+        hidden = F.relu(self.fc(state_))
+        out = self.fc_out(hidden)
+        return out
+
 
 class QValueNet(torch.nn.Module):
     def __init__(self, state_dim, action_dim) -> None:
@@ -379,7 +485,7 @@ class QValueNet(torch.nn.Module):
         # state : waypoints info+ vehicle_front info, shape: batch_size*22, first 20 elements are waypoints info,
         # the rest are vehicle info
         state_wp = state[:, :self.state_dim['waypoints']]
-        state_ev = state[:,-self.state_dim['vehicle_front']-self.state_dim['ego_vehicle']:-self.state_dim['vehicle_front']]
+        state_ev = state[:, -self.state_dim['vehicle_front']-self.state_dim['ego_vehicle']:-self.state_dim['vehicle_front']]
         state_vf = state[:, -self.state_dim['vehicle_front']:]
         state_wp=F.relu(self.fc1_1(state_wp))
         state_ev=F.relu(self.fc1_2(state_ev))
@@ -449,7 +555,7 @@ class DDPG:
         self.replace_a = 0
         self.replace_c = 0
         self.s_dim = state_dim  # state_dim here is a dict
-        self.s_dim['waypoints']*=2  # The input waypoints info has been compressed
+        self.s_dim['waypoints'] *= 2  # 2 is the feature dim of each waypoint
         self.a_dim, self.a_bound = action_dim, action_bound
         self.theta = theta
         self.gamma, self.tau, self.sigma, self.epsilon = gamma, tau, sigma, epsilon  # sigma:高斯噪声的标准差，均值直接设置为0
@@ -457,18 +563,22 @@ class DDPG:
         self.actor_lr, self.critic_lr = actor_lr, critic_lr
         # adjust different types of replay buffer
         #self.replay_buffer = Split_ReplayBuffer(buffer_size)
-        self.replay_buffer =ReplayBuffer(buffer_size)
+        self.replay_buffer = ReplayBuffer(buffer_size)
         # self.replay_buffer = offline_replay_buffer()
         """self.memory=torch.tensor((buffer_size,self.s_dim*2+self.a_dim+1+1),
             dtype=torch.float32).to(self.device)"""
         self.pointer = 0  # serve as updating the memory data
         self.train = True
-
-        self.actor = PolicyNet(self.s_dim, self.a_bound).to(self.device)
-        self.actor_target = PolicyNet(self.s_dim, self.a_bound).to(self.device)
+        self.actor = PolicyNet_multi(self.s_dim, self.a_bound).to(self.device)
+        self.actor_target = PolicyNet_multi(self.s_dim, self.a_bound).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.critic = QValueNet(self.s_dim, self.a_dim).to(self.device)
-        self.critic_target = QValueNet(self.s_dim, self.a_dim).to(self.device)
+        self.critic = QValueNet_multi(self.s_dim, self.a_dim).to(self.device)
+        self.critic_target = QValueNet_multi(self.s_dim, self.a_dim).to(self.device)
+        # self.actor = PolicyNet(self.s_dim, self.a_bound).to(self.device)
+        # self.actor_target = PolicyNet(self.s_dim, self.a_bound).to(self.device)
+        # self.actor_target.load_state_dict(self.actor.state_dict())
+        # self.critic = QValueNet(self.s_dim, self.a_dim).to(self.device)
+        # self.critic_target = QValueNet(self.s_dim, self.a_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
@@ -479,10 +589,20 @@ class DDPG:
         self.tb_noise = OrnsteinUhlenbeckActionNoise(self.sigma, self.theta)
 
     def take_action(self, state):
-        state_wps = torch.tensor(state['waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
-        state_ev=torch.tensor(state['ego_vehicle'],dtype=torch.float32).view(1,-1).to(self.device)
-        state_vf = torch.tensor(state['vehicle_front'], dtype=torch.float32).view(1, -1).to(self.device)
-        state_ = torch.cat((state_wps,state_ev, state_vf), dim=1)
+        print('vehicle_info', state['vehicle_info'])
+        state_left_wps = torch.tensor(state['left_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
+        state_center_wps = torch.tensor(state['center_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
+        state_right_wps = torch.tensor(state['right_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
+        state_veh_left_front = torch.tensor(state['vehicle_info'][0], dtype=torch.float32).view(1, -1).to(self.device)
+        state_veh_front = torch.tensor(state['vehicle_info'][1], dtype=torch.float32).view(1, -1).to(self.device)
+        state_veh_right_front = torch.tensor(state['vehicle_info'][2], dtype=torch.float32).view(1, -1).to(self.device)
+        state_veh_left_rear = torch.tensor(state['vehicle_info'][3], dtype=torch.float32).view(1, -1).to(self.device)
+        state_veh_rear = torch.tensor(state['vehicle_info'][4], dtype=torch.float32).view(1, -1).to(self.device)
+        state_veh_right_rear = torch.tensor(state['vehicle_info'][5], dtype=torch.float32).view(1, -1).to(self.device)
+        state_ev = torch.tensor(state['ego_vehicle'],dtype=torch.float32).view(1,-1).to(self.device)
+        state_ = torch.cat((state_left_wps, state_veh_left_front, state_veh_left_rear,
+                            state_center_wps, state_veh_front, state_veh_rear,
+                            state_right_wps, state_veh_right_front, state_veh_right_rear, state_ev), dim=1)
         # print(state_.shape)
         action = self.actor(state_)
         print(f'Network Output - Steer: {action[0][0]}, Throttle_brake: {action[0][1]}')

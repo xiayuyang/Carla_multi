@@ -1,5 +1,5 @@
 """ Module with auxiliary functions. """
-
+import logging
 import math
 import numpy as np
 import carla
@@ -19,8 +19,8 @@ def remove_unnecessary_objects(world):
     # world.unload_map_layer(carla.MapLayer.Particles)
     world.unload_map_layer(carla.MapLayer.Ground)
     labels=[carla.CityObjectLabel.TrafficSigns,carla.CityObjectLabel.TrafficLight,carla.CityObjectLabel.Other,
-        carla.CityObjectLabel.Poles,carla.CityObjectLabel.Static,carla.CityObjectLabel.Dynamic,carla.CityObjectLabel.Buildings,
-        carla.CityObjectLabel.Fences,carla.CityObjectLabel.Walls,carla.CityObjectLabel.Vegetation,carla.CityObjectLabel.Ground]
+        carla.CityObjectLabel.Poles, carla.CityObjectLabel.Static,carla.CityObjectLabel.Dynamic,carla.CityObjectLabel.Buildings,
+        carla.CityObjectLabel.Fences, carla.CityObjectLabel.Walls,carla.CityObjectLabel.Vegetation,carla.CityObjectLabel.Ground]
     objs = set()
     for label in labels:
         for obj in world.get_environment_objects(label):
@@ -28,7 +28,7 @@ def remove_unnecessary_objects(world):
     world.enable_environment_objects(objs, False)
     # world.unload_map_layer(carla.MapLayer.Props)
 
-def test_waypoint(waypoint):
+def test_waypoint(waypoint, ego=False):
     """
     test if a given waypoint is on chosen route
     :param reward: 
@@ -40,11 +40,14 @@ def test_waypoint(waypoint):
     #     return True
     # if waypoint.road_id in CURVE and waypoint.lane_id == 1:
     #     return True
-
-    if waypoint.road_id in ROADS and (waypoint.lane_id == -1 or waypoint.lane_id == -2 or waypoint.lane_id == -3):
-        return True
-
-    return False
+    if not ego:
+        if (waypoint.road_id in ROADS or waypoint.road_id in DOUBLE_DIRECTION) and (waypoint.lane_id == -1 or waypoint.lane_id == -2 or waypoint.lane_id == -3):
+            return True
+        return False
+    else:
+        if waypoint.road_id in ROADS and (waypoint.lane_id == -1 or waypoint.lane_id == -2 or waypoint.lane_id == -3):
+            return True
+        return False
 
 
 def draw_waypoints(world, waypoints, life_time=0.0, z=0.5):
@@ -62,7 +65,7 @@ def draw_waypoints(world, waypoints, life_time=0.0, z=0.5):
         end = begin + carla.Location(x=math.cos(angle), y=math.sin(angle))
         world.debug.draw_arrow(begin, end, arrow_size=0.3, life_time=life_time)
 
-def get_lane_center(map,location):
+def get_lane_center(map, location):
     """Project current loction to its lane center, return lane center waypoint"""
     # test code for junction lane invasion bug
     # if lane_center.is_junction:
@@ -81,18 +84,26 @@ def get_lane_center(map,location):
 
     lane_center = map.get_waypoint(location, project_to_road=True)
     road_id = lane_center.road_id
+    lane_id = lane_center.lane_id
     in_road = road_id in ROADS
-    if not in_road:
-        """
-            if ego vehicle not in the specific roads, we first get the right waypoint of lanecenter
-            and then get the left waypoint of the right waypoint
-            finally, check lanecenter whether is in lane -1
-            if != -1, it indicate lanecenter in shoulder, thus get the right waypoint
-        """
-        right = lane_center.get_right_lane()
-        lane_center = right.get_left_lane()
+
+    if not in_road and road_id in DOUBLE_DIRECTION:
+        # in a left+straight, get_right_lane = None, for example: road 2039 in Town05
+        # """
+        #     if ego vehicle not in the specific roads, we first get the right waypoint of lanecenter
+        #     and then get the left waypoint of the right waypoint
+        #     finally, check lanecenter whether is in lane -1
+        #     if != -1, it indicate lanecenter in shoulder, thus get the right waypoint
+        # """
+        # print('in_road: ', location, lane_center, in_road, road_id, ROADS)
+        # right = lane_center.get_right_lane()
+        # lane_center = right.get_left_lane()
+        # if lane_center.lane_id != -1:
+        #     lane_center = lane_center.get_right_lane()
+        lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Shoulder)
+        lane_center = lane_shoulder.get_right_lane()
         if lane_center.lane_id != -1:
-            lane_center = lane_center.get_right_lane()
+            logging.error('get lane error!!')
 
     return lane_center
 

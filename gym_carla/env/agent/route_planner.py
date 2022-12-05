@@ -60,7 +60,9 @@ class GlobalPlanner:
         """Vehicle can only be spawned on specific roads, return transforms"""
         spawn_points = []
         for wp in self._route:
+            print('wp.lane_id: ', wp.lane_id)
             if wp.road_id in STRAIGHT or wp.road_id in CURVE:
+                # print(wp.lane_id)
                 temp = carla.Transform(wp.transform.location, wp.transform.rotation)
                 # Increase the z value a little bit to avoid collison upon initializing
                 temp.location.z += 0.1
@@ -69,7 +71,17 @@ class GlobalPlanner:
         return spawn_points
 
     def _build_route(self):
-        begin = self._topology[0]
+        begin_1 = self._topology[0]
+        begin_2 = self._topology[1]
+        begin_3 = self._topology[2]
+        self._build(begin_1)
+        self._build(begin_2)
+        self._build(begin_3)
+
+        # remove start
+        # print(len(self._route))
+
+    def _build(self,begin):
         self._route.append(begin['entry'])
         for wp in begin['path']:
             self._route.append(wp)
@@ -91,9 +103,6 @@ class GlobalPlanner:
                 if seg['entry'].id == indicator.id:
                     iter = seg
                     break
-
-        # remove start
-        # print(len(self._route))
 
     def _compute_next_waypoints(self, cur_wp, k=1):
         """
@@ -348,7 +357,7 @@ class LocalPlanner:
 
     def _get_waypoints(self):
         """Get the next waypoint list according to ego vehicle's current location"""
-        lane_center= get_lane_center(self._map, self._vehicle.get_location())
+        lane_center = get_lane_center(self._map, self._vehicle.get_location())
         _waypoints_queue = deque(maxlen=600)
         _waypoints_queue.append(lane_center)
         available_entries = _waypoints_queue.maxlen - len(self._waypoints_queue)
@@ -412,6 +421,38 @@ class LocalPlanner:
             _waypoints_queue.popleft()
         return _waypoints_queue
 
+    def get_rear_waypoint_one_lane(self, buffer_size, waypoint=None):
+        _waypoints_queue = deque(maxlen=600)
+        if waypoint is not None:
+            _waypoints_queue.append(waypoint)
+            available_entries = _waypoints_queue.maxlen - len(self._waypoints_queue)
+            k = min(available_entries, buffer_size)
+            for _ in range(k):
+                last_waypoint = _waypoints_queue[-1]
+                previous_waypoints = list(last_waypoint.previous(self._sampling_radius))
+
+                if len(previous_waypoints) == 0:
+                    break
+                elif len(previous_waypoints) == 1:
+                    # only one option available ==> lanefollowing
+                    previous_waypoint = previous_waypoints[0]
+                    # road_option = RoadOption.LANEFOLLOW
+                else:
+                    # road_options_list = self._retrieve_options(
+                    #     next_waypoints, last_waypoint)
+
+                    idx = None
+                    for i, wp in enumerate(previous_waypoints):
+                        if wp.road_id in ROADS:
+                            previous_waypoint = wp
+                            idx = i
+                    # road_option = road_options_list[idx]
+
+                _waypoints_queue.append(previous_waypoint)
+            # delete an element from the left
+            _waypoints_queue.popleft()
+        return _waypoints_queue
+
     def _get_waypoints_multilane(self):
         """
         :return: front waypoints (self._buffer_size) in three lanes
@@ -419,21 +460,68 @@ class LocalPlanner:
         lane_center = get_lane_center(self._map, self._vehicle.get_location())
         lane_id = lane_center.lane_id
         left = None
-        center = None
+        center = lane_center
         right = None
         if lane_id == -1:
-            center = lane_center
-            right = lane_center.get_right_lane()
+            right = center.get_right_lane()
+            right_right = right.get_right_lane()
+            return [self.get_waypoint_one_lane(self._buffer_size, left),
+               self.get_waypoint_one_lane(self._buffer_size, center),
+               self.get_waypoint_one_lane(self._buffer_size, right),
+               self.get_rear_waypoint_one_lane(self._buffer_size, left),
+               self.get_rear_waypoint_one_lane(self._buffer_size, center),
+               self.get_rear_waypoint_one_lane(self._buffer_size, right)], [self.get_waypoint_one_lane(self._buffer_size, center),
+             self.get_waypoint_one_lane(self._buffer_size, right),
+             self.get_waypoint_one_lane(self._buffer_size, right_right),
+             self.get_rear_waypoint_one_lane(self._buffer_size, center),
+             self.get_rear_waypoint_one_lane(self._buffer_size, right),
+             self.get_rear_waypoint_one_lane(self._buffer_size, right_right)]
         elif lane_id == -2:
+            left = center.get_left_lane()
+            right = center.get_right_lane()
+            return [self.get_waypoint_one_lane(self._buffer_size, left),
+               self.get_waypoint_one_lane(self._buffer_size, center),
+               self.get_waypoint_one_lane(self._buffer_size, right),
+               self.get_rear_waypoint_one_lane(self._buffer_size, left),
+               self.get_rear_waypoint_one_lane(self._buffer_size, center),
+               self.get_rear_waypoint_one_lane(self._buffer_size, right)], [self.get_waypoint_one_lane(self._buffer_size, left),
+             self.get_waypoint_one_lane(self._buffer_size, center),
+             self.get_waypoint_one_lane(self._buffer_size, right),
+             self.get_rear_waypoint_one_lane(self._buffer_size, left),
+             self.get_rear_waypoint_one_lane(self._buffer_size, center),
+             self.get_rear_waypoint_one_lane(self._buffer_size, right)]
+        elif lane_id == -3:
+            left = center.get_left_lane()
+            left_left = left.get_left_lane()
+            return [self.get_waypoint_one_lane(self._buffer_size, left),
+               self.get_waypoint_one_lane(self._buffer_size, center),
+               self.get_waypoint_one_lane(self._buffer_size, right),
+               self.get_rear_waypoint_one_lane(self._buffer_size, left),
+               self.get_rear_waypoint_one_lane(self._buffer_size, center),
+               self.get_rear_waypoint_one_lane(self._buffer_size, right)], [self.get_waypoint_one_lane(self._buffer_size, center),
+             self.get_waypoint_one_lane(self._buffer_size, left),
+             self.get_waypoint_one_lane(self._buffer_size, left_left),
+             self.get_rear_waypoint_one_lane(self._buffer_size, center),
+             self.get_rear_waypoint_one_lane(self._buffer_size, left),
+             self.get_rear_waypoint_one_lane(self._buffer_size, left_left)]
+        else:
+            # just to avoid error, we will not use the return
             left = lane_center.get_left_lane()
             center = lane_center
             right = lane_center.get_right_lane()
-        elif lane_id == -3:
-            left = lane_center.get_right_lane()
-            center = lane_center
+            return [self.get_waypoint_one_lane(self._buffer_size, left),
+                    self.get_waypoint_one_lane(self._buffer_size, center),
+                    self.get_waypoint_one_lane(self._buffer_size, right),
+                    self.get_rear_waypoint_one_lane(self._buffer_size, left),
+                    self.get_rear_waypoint_one_lane(self._buffer_size, center),
+                    self.get_rear_waypoint_one_lane(self._buffer_size, right)], [
+                       self.get_waypoint_one_lane(self._buffer_size, left),
+                       self.get_waypoint_one_lane(self._buffer_size, center),
+                       self.get_waypoint_one_lane(self._buffer_size, right),
+                       self.get_rear_waypoint_one_lane(self._buffer_size, left),
+                       self.get_rear_waypoint_one_lane(self._buffer_size, center),
+                       self.get_rear_waypoint_one_lane(self._buffer_size, right)]
 
-        return self.get_waypoint_one_lane(self._buffer_size, left), \
-               self.get_waypoint_one_lane(self._buffer_size, center), self.get_waypoint_one_lane(self._buffer_size, right)
 
     # def _get_waypoints(self):
     #     """
@@ -562,6 +650,10 @@ class LocalPlanner:
         rear_left_vehicle = self._get_rear_vehicle(vehicle_list, -1)
         rear_vehicle = self._get_rear_vehicle(vehicle_list, 0)
         rear_right_vehicle = self._get_rear_vehicle(vehicle_list, 1)
+        # if front_vehicle != None:
+        #     print('front_vehicle.location: ', front_vehicle.get_location())
+        # if rear_vehicle != None:
+        #     print('rear_vehicle.location: ', rear_vehicle.get_location())
         return [front_left_vehicle, front_vehicle, front_right_vehicle, rear_left_vehicle, rear_vehicle, rear_right_vehicle]
 
     def _get_rear_vehicle(self, vehicle_list, direction=0):
@@ -581,13 +673,14 @@ class LocalPlanner:
         """
 
         ego_vehicle_location = self._vehicle.get_location()
+        ego_vehicle_transform = self._vehicle.get_transform()
         ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
         ego_vehicle_lane_center = get_lane_center(self._map, ego_vehicle_location)
         min_distance = self._proximity_threshold
-        vehicle_front = None
+        vehicle_rear = None
         lane_id = ego_vehicle_lane_center.lane_id - direction
         if lane_id != -1 and lane_id != -2 and lane_id != -3:
-            return vehicle_front
+            return vehicle_rear
 
         for target_vehicle in vehicle_list:
             # do not account for the ego vehicle
@@ -597,6 +690,9 @@ class LocalPlanner:
             # if the object is not in our lane it's not an obstacle
             target_vehicle_waypoint = self._map.get_waypoint(target_vehicle.get_location())
             # check whether in the same road
+            target_lane_center = get_lane_center(self._map, target_vehicle.get_location())
+            if target_lane_center.transform.location.distance(target_vehicle.get_location()) > target_lane_center.lane_width / 2 + 0.1:
+                continue
             if not test_waypoint(target_vehicle_waypoint):
                 continue
             # check whether in the specific lane
@@ -607,15 +703,13 @@ class LocalPlanner:
             #     continue
 
             loc = target_vehicle.get_location()
-            if is_within_distance_ahead(loc, ego_vehicle_location,
-                                        self._vehicle.get_transform(),
-                                        self._proximity_threshold):
+            if is_within_distance_rear(loc, ego_vehicle_location, ego_vehicle_transform, self._proximity_threshold):
                 if ego_vehicle_location.distance(loc) < min_distance:
                     # Return the most close vehicel in front of ego vehicle
-                    vehicle_front=target_vehicle
-                    min_distance=ego_vehicle_location.distance(loc)
+                    vehicle_rear = target_vehicle
+                    min_distance = ego_vehicle_location.distance(loc)
 
-        return vehicle_front
+        return vehicle_rear
 
     def _get_front_vehicle(self, vehicle_list, direction=0):
         """
@@ -635,13 +729,14 @@ class LocalPlanner:
         """
 
         ego_vehicle_location = self._vehicle.get_location()
+        ego_vehicle_transform = self._vehicle.get_transform()
         ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
         ego_vehicle_lane_center = get_lane_center(self._map, ego_vehicle_location)
         min_distance = self._proximity_threshold
-        vehicle_rear = None
+        vehicle_front = None
         lane_id = ego_vehicle_lane_center.lane_id - direction
         if lane_id != -1 and lane_id != -2 and lane_id != -3:
-            return vehicle_rear
+            return vehicle_front
 
         for target_vehicle in vehicle_list:
             # do not account for the ego vehicle
@@ -651,6 +746,9 @@ class LocalPlanner:
             # if the object is not in our lane it's not an obstacle
             target_vehicle_waypoint = self._map.get_waypoint(target_vehicle.get_location())
             # check whether in the same road
+            target_lane_center = get_lane_center(self._map, target_vehicle.get_location())
+            if target_lane_center.transform.location.distance(target_vehicle.get_location()) > target_lane_center.lane_width / 2 + 0.1:
+                continue
             if not test_waypoint(target_vehicle_waypoint):
                 continue
             # check whether in the specific lane
@@ -661,15 +759,13 @@ class LocalPlanner:
             #     continue
 
             loc = target_vehicle.get_location()
-            if is_within_distance_rear(loc, ego_vehicle_location,
-                                        self._vehicle.get_transform(),
-                                        self._proximity_threshold):
+            if is_within_distance_ahead(loc, ego_vehicle_location, ego_vehicle_transform, self._proximity_threshold):
                 if ego_vehicle_location.distance(loc) < min_distance:
                     # Return the most close vehicel in front of ego vehicle
-                    vehicle_rear=target_vehicle
-                    min_distance=ego_vehicle_location.distance(loc)
+                    vehicle_front = target_vehicle
+                    min_distance = ego_vehicle_location.distance(loc)
 
-        return vehicle_rear
+        return vehicle_front
 
     def _is_light_red_us_style(self, lights_list):
         """
