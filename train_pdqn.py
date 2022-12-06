@@ -83,7 +83,7 @@ def main():
                         while not done and not truncated:
                             action, action_param, all_action_param = agent.take_action(state)
 
-                            next_state, reward, truncated, done, info = env.step(action)
+                            next_state, reward, truncated, done, info = env.step(action_param)
                             if env.is_effective_action() and not info['Abandon']:
                                 if 'Throttle' in info:
                                     # Input the guided action to replay buffer

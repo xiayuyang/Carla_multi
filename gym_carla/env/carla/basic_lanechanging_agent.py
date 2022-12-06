@@ -113,7 +113,24 @@ class Basic_Lanechanging_Agent(object):
             self.lanechanging_fps = opt_dict['lanechanging_fps']
 
         print('ignore_front_vehicle, ignore_change_gap: ', self._ignore_vehicle, self._ignore_change_gap)
+
+        self.left_random_change = []
+        self.center_random_change = []
+        self.right_random_change = []
+        self.init_random_change()
+
         self._local_planner = LocalPlanner(self._vehicle, opt_dict=opt_dict)
+
+    def init_random_change(self):
+        for i in range(self.lanechanging_fps):
+            self.left_random_change.append(0)
+            self.center_random_change.append(0)
+            # center_random_change.append(0)
+            self.right_random_change.append(0)
+        self.left_random_change.append(1)
+        self.center_random_change.append(1)
+        self.center_random_change.append(-1)
+        self.right_random_change.append(-1)
 
     def add_emergency_stop(self, control):
         """
@@ -185,11 +202,11 @@ class Basic_Lanechanging_Agent(object):
         #     self.center_next_waypoint = self.center_wps[1]
         # if len(self.right_wps) != 0:
         #     self.right_next_waypoint = self.right_wps[1]
+        self.enable_left_change = self.check_enable_change(self.left_wps, self.distance_to_left_front, self.distance_to_left_rear)
+        self.enable_right_change = self.check_enable_change(self.right_wps, self.distance_to_right_front, self.distance_to_right_rear)
         if self._ignore_change_gap:
             self.enable_left_change = True
             self.enable_right_change = True
-        self.enable_left_change = self.check_enable_change(self.left_wps, self.distance_to_left_front, self.distance_to_left_rear)
-        self.enable_right_change = self.check_enable_change(self.right_wps, self.distance_to_right_front, self.distance_to_right_rear)
         print("distance enable: ", self.distance_to_left_front, self.distance_to_center_front,
               self.distance_to_right_front, self.distance_to_left_rear, self.distance_to_center_rear,
               self.distance_to_right_rear, self.enable_left_change, self.enable_right_change)
@@ -248,25 +265,12 @@ class Basic_Lanechanging_Agent(object):
         if affected_by_tlight:
             hazard_detected = True
 
-        not_lane_change_step = self.lanechanging_fps
-        left_random_change = []
-        center_random_change = []
-        right_random_change = []
-        for i in range(not_lane_change_step):
-            left_random_change.append(0)
-            center_random_change.append(0)
-            center_random_change.append(0)
-            right_random_change.append(0)
-        left_random_change.append(1)
-        center_random_change.append(1)
-        center_random_change.append(-1)
-        right_random_change.append(-1)
         if current_lane == -2:
-            self.lane_change = random.choice(center_random_change)
+            self.lane_change = random.choice(self.center_random_change)
         elif current_lane == -1:
-            self.lane_change = random.choice(left_random_change)
+            self.lane_change = random.choice(self.left_random_change)
         elif current_lane == -3:
-            self.lane_change = random.choice(right_random_change)
+            self.lane_change = random.choice(self.right_random_change)
         else:
             # just to avoid error, dont work
             self.lane_change = 0

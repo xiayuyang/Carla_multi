@@ -88,7 +88,7 @@ def get_lane_center(map, location):
     # print('before process road_id and lane_id: ', road_id, lane_id)
     in_road = road_id in ROADS
 
-    if not in_road and road_id in DISTURB_ROADS:
+    if road_id in DISTURB_ROADS:
         # in a left+straight, get_right_lane = None, for example: road 2039 in Town05
         # """
         #     if ego vehicle not in the specific roads, we first get the right waypoint of lanecenter
@@ -101,16 +101,31 @@ def get_lane_center(map, location):
         # lane_center = right.get_left_lane()
         # if lane_center.lane_id != -1:
         #     lane_center = lane_center.get_right_lane()
-        lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Shoulder)
+        lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Sidewalk)
         print('lane_shoulder', lane_shoulder, lane_shoulder.lane_id)
-        lane_center_right = lane_shoulder.get_right_lane()
-        lane_center_left = lane_shoulder.get_left_lane()
-        if (lane_center_right is None or lane_center_right.lane_id != -1) and (lane_center_left is None or lane_center_left.lane_id != -1):
-            logging.error('get lane error!!')
-        elif lane_center_left is not None and lane_center_left.lane_id == -1:
-            lane_center = lane_center_left
-        elif lane_center_right is not None and lane_center_right.lane_id == -1:
-            lane_center = lane_center_right
+        if lane_shoulder.lane_id == -1:
+            lane_center_right = lane_shoulder.get_right_lane()
+            lane_center_left = lane_shoulder.get_left_lane()
+            if lane_center_right is not None:
+                print('lane_center_right', lane_center_right, lane_center_right.lane_id)
+            else:
+                print('right is None')
+            if lane_center_left is not None:
+                print('lane_center_left', lane_center_left, lane_center_left.lane_id)
+            else:
+                print('left is None')
+            if (lane_center_right is None or lane_center_right.lane_id != -1) and (lane_center_left is None or lane_center_left.lane_id != -1):
+                logging.error('get lane error!!')
+            elif lane_center_left is not None and lane_center_left.lane_id == -1:
+                lane_center = lane_center_left
+            elif lane_center_right is not None and lane_center_right.lane_id == -1:
+                lane_center = lane_center_right
+        elif lane_shoulder.lane_id == -5:
+            print('lane_shoulder.lane_id == -5')
+            lane_center = lane_shoulder.get_left_lane().get_left_lane().get_left_lane().get_left_lane()
+        # elif lane_shoulder.lane_id == -6:
+        #     print('lane_shoulder.lane_id == -5')
+        #     lane_center = lane_shoulder.get_left_lane().get_left_lane().get_left_lane().get_left_lane().get_left_lane()
 
     return lane_center
 

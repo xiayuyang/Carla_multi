@@ -231,19 +231,19 @@ class P_DQN:
         action = np.argmax(q_a)
         action_param = all_action_param[:, self.action_parameter_offsets[action]:self.action_parameter_offsets[action+1]]
 
-        print(f'Network Output - Steer: {action[0][0]}, Throttle_brake: {action[0][1]}')
-        if (action[0, 0].is_cuda):
-            action = np.array([action[:, 0].detach().cpu().numpy(), action[:, 1].detach().cpu().numpy()]).reshape((-1, 2))
+        print(f'Network Output - Steer: {action_param[0][0]}, Throttle_brake: {action_param[0][1]}')
+        if (action_param[0, 0].is_cuda):
+            action_param = np.array([action_param[:, 0].detach().cpu().numpy(), action_param[:, 1].detach().cpu().numpy()]).reshape((-1, 2))
         else:
-            action = np.array([action[:, 0].detach().numpy(), action[:, 1].detach().numpy()]).reshape((-1, 2))
+            action_param = np.array([action_param[:, 0].detach().numpy(), action_param[:, 1].detach().numpy()]).reshape((-1, 2))
         # if np.random.random()<self.epsilon:
         if self.train:
-            action[:, 0] = np.clip(np.random.normal(action[:, 0], self.sigma), -1, 1)
-            action[:, 1] = np.clip(np.random.normal(action[:, 1], self.sigma), -1, 1)
+            action_param[:, 0] = np.clip(np.random.normal(action_param[:, 0], self.sigma), -1, 1)
+            action_param[:, 1] = np.clip(np.random.normal(action_param[:, 1], self.sigma), -1, 1)
         # if self.train:
         #     action[:,0]=np.clip(action[:,0]+self.steer_noise(),-1,1)
         #     action[:,1]=np.clip(action[:,1]+self.tb_noise(),-1,1)
-        print(f'After noise - Steer: {action[0][0]}, Throttle_brake: {action[0][1]}')
+        print(f'After noise - Steer: {action_param[0][0]}, Throttle_brake: {action_param[0][1]}')
         # for i in range(action.shape[0]):
         #     if action[i,1]>0:
         #         action[i,1]+=np.clip(np.random.normal(action[i,1],self.sigma),0,self.a_bound['throttle'])
