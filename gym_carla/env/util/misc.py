@@ -85,7 +85,7 @@ def get_lane_center(map, location):
     lane_center = map.get_waypoint(location, project_to_road=True)
     road_id = lane_center.road_id
     lane_id = lane_center.lane_id
-    # print('before process road_id and lane_id: ', road_id, lane_id)
+    print('before process road_id and lane_id: ', road_id, lane_id)
     in_road = road_id in ROADS
 
     if road_id in DISTURB_ROADS:
