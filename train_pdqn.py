@@ -4,7 +4,7 @@ import random, collections
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from algs.ddpg import DDPG
+from algs.pdqn import P_DQN
 from gym_carla.env.settings import ARGS
 from gym_carla.env.carla_env import CarlaEnv
 from process import start_process, kill_process
@@ -55,8 +55,8 @@ def main():
     result = []
 
     for run in [base_name]:
-        agent = DDPG(s_dim, a_dim, a_bound, GAMMA, TAU, SIGMA, THETA, EPSILON, BUFFER_SIZE, BATCH_SIZE, LR_ACTOR,
-                     LR_CRITIC, clip_grad, DEVICE)
+        agent = P_DQN(s_dim, a_dim, a_bound, GAMMA, TAU, SIGMA, THETA, EPSILON, BUFFER_SIZE, BATCH_SIZE, LR_ACTOR,
+                     LR_CRITIC, clip_grad, zero_index_gradients, inverting_gradients, DEVICE)
 
         # training part
         max_rolling_score = np.float('-5')
@@ -81,18 +81,19 @@ def main():
                         score_s, score_e, score_c = 0, 0, 0  # part objective scores
 
                         while not done and not truncated:
-                            action = agent.take_action(state)
+                            action, action_param, all_action_param = agent.take_action(state)
 
                             next_state, reward, truncated, done, info = env.step(action)
                             if env.is_effective_action() and not info['Abandon']:
                                 if 'Throttle' in info:
                                     # Input the guided action to replay buffer
                                     throttle_brake = -info['Brake'] if info['Brake'] > 0 else info['Throttle']
-                                    action = np.array([[info['Steer'], throttle_brake]])
-                                    agent.replay_buffer.add(state, action, reward, next_state, truncated, done, info)
+                                    action = info['Change']
+                                    action_param = np.array([[info['Steer'], throttle_brake]])
+                                    agent.replay_buffer.add(state, action, action_param, reward, next_state, truncated, done, info)
                                 else:
                                     # Input the agent action to replay buffer
-                                    agent.replay_buffer.add(state, action, reward, next_state, truncated, done, info)
+                                    agent.replay_buffer.add(state, action, action_param, reward, next_state, truncated, done, info)
                                 print(f"state -- vehicle_info:{state['vehicle_info']}\n"
                                       f"waypoints:{state['left_waypoints']}, \n"
                                       f"waypoints:{state['center_waypoints']}, \n"
@@ -104,6 +105,7 @@ def main():
                                       f"waypoints:{next_state['right_waypoints']}, \n"
                                       f"ego_vehicle:{next_state['ego_vehicle']}\n"
                                       f"action:{action}\n"
+                                      f"action_param:{action_param}\n"
                                       f"reward:{reward}\n"
                                       f"truncated:{truncated}, done:{done}")
                                 print()
@@ -118,7 +120,7 @@ def main():
                             score_e += info['Efficiency']
                             score_c += info['Comfort']
 
-                            if env.total_step==args.pre_train_steps:
+                            if env.total_step == args.pre_train_steps:
                                 agent.save_net('./out/ddpg_pre_trained.pth')
 
                             if env.rl_control_step > 10000 and env.is_effective_action() and \

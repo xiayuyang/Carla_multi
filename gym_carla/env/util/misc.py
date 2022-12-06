@@ -85,6 +85,7 @@ def get_lane_center(map, location):
     lane_center = map.get_waypoint(location, project_to_road=True)
     road_id = lane_center.road_id
     lane_id = lane_center.lane_id
+    print('before process road_id and lane_id: ', road_id, lane_id)
     in_road = road_id in ROADS
 
     if not in_road and road_id in DOUBLE_DIRECTION:
@@ -101,9 +102,14 @@ def get_lane_center(map, location):
         # if lane_center.lane_id != -1:
         #     lane_center = lane_center.get_right_lane()
         lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Shoulder)
-        lane_center = lane_shoulder.get_right_lane()
-        if lane_center.lane_id != -1:
+        lane_center_right = lane_shoulder.get_right_lane()
+        lane_center_left = lane_shoulder.get_left_lane()
+        if lane_center_right.lane_id != -1 and lane_center_left != -1:
             logging.error('get lane error!!')
+        elif lane_center_left == -1:
+            lane_center = lane_center_left
+        elif lane_center_right == -1:
+            lane_center = lane_center_right
 
     return lane_center
 

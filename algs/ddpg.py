@@ -550,7 +550,7 @@ class LaneEncoder(torch.nn.Module):
 
 class DDPG:
     def __init__(self, state_dim, action_dim, action_bound, gamma, tau, sigma, theta, epsilon,
-                 buffer_size, batch_size, actor_lr, critic_lr, device) -> None:
+                 buffer_size, batch_size, actor_lr, critic_lr, clip_grad, device) -> None:
         self.learn_time = 0
         self.replace_a = 0
         self.replace_c = 0
@@ -561,6 +561,7 @@ class DDPG:
         self.gamma, self.tau, self.sigma, self.epsilon = gamma, tau, sigma, epsilon  # sigma:高斯噪声的标准差，均值直接设置为0
         self.buffer_size, self.batch_size, self.device = buffer_size, batch_size, device
         self.actor_lr, self.critic_lr = actor_lr, critic_lr
+        self.clip_grad = clip_grad
         # adjust different types of replay buffer
         #self.replay_buffer = Split_ReplayBuffer(buffer_size)
         self.replay_buffer = ReplayBuffer(buffer_size)
@@ -589,7 +590,7 @@ class DDPG:
         self.tb_noise = OrnsteinUhlenbeckActionNoise(self.sigma, self.theta)
 
     def take_action(self, state):
-        print('vehicle_info', state['vehicle_info'])
+        # print('vehicle_info', state['vehicle_info'])
         state_left_wps = torch.tensor(state['left_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
         state_center_wps = torch.tensor(state['center_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
         state_right_wps = torch.tensor(state['right_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
@@ -645,13 +646,20 @@ class DDPG:
         action_target = self.actor_target(batch_ns)
         next_q_values = self.critic_target(batch_ns, action_target)
         q_targets = batch_r + self.gamma * next_q_values * (1 - batch_t)
-        critic_loss = self.loss(self.critic(batch_s, batch_a), q_targets)
-        print(f'TD-error:{critic_loss}')
+        q_ = self.critic(batch_s, batch_a)
+        critic_loss = self.loss(q_, q_targets)
+        td_max = 0
+        index = 0
+        for i in range(self.batch_size):
+            if abs(q_[i]-q_targets[i]) > td_max:
+                td_max = abs(q_[i]-q_targets[i])
+                index = i
+        print(f'TD-error:{critic_loss}', td_max, index)
+        print(batch_s[index], batch_ns[index], batch_a[index], batch_r[index], batch_t[index])
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
-        # print()
-        # self._print_grad(self.critic)
-        # print()
+        if self.clip_grad > 0:
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.clip_grad)
         self.critic_optimizer.step()
 
         action = self.actor(batch_s)
@@ -659,6 +667,8 @@ class DDPG:
         actor_loss = -torch.mean(q)
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        if self.clip_grad > 0:
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.clip_grad)
         self.actor_optimizer.step()
 
         self.soft_update(self.actor, self.actor_target)

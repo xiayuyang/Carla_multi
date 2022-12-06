@@ -112,6 +112,7 @@ class Basic_Lanechanging_Agent(object):
         if 'lanechanging_fps' in opt_dict:
             self.lanechanging_fps = opt_dict['lanechanging_fps']
 
+        print('ignore_front_vehicle, ignore_change_gap: ', self._ignore_vehicle, self._ignore_change_gap)
         self._local_planner = LocalPlanner(self._vehicle, opt_dict=opt_dict)
 
     def add_emergency_stop(self, control):
@@ -193,7 +194,9 @@ class Basic_Lanechanging_Agent(object):
             self.center_next_waypoint = self.center_wps[1]
         if len(self.right_wps) != 0:
             self.right_next_waypoint = self.right_wps[1]
-
+        if self._ignore_change_gap:
+            self.enable_left_change = True
+            self.enable_right_change = True
         self.enable_left_change = self.check_enable_change(self.left_wps, self.distance_to_left_front, self.distance_to_left_rear)
         self.enable_right_change = self.check_enable_change(self.right_wps, self.distance_to_right_front, self.distance_to_right_rear)
         print("distance enable: ", self.distance_to_left_front, self.distance_to_center_front,

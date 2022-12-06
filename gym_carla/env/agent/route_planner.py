@@ -60,7 +60,7 @@ class GlobalPlanner:
         """Vehicle can only be spawned on specific roads, return transforms"""
         spawn_points = []
         for wp in self._route:
-            print('wp.lane_id: ', wp.lane_id)
+            # print('wp.lane_id: ', wp.lane_id)
             if wp.road_id in STRAIGHT or wp.road_id in CURVE:
                 # print(wp.lane_id)
                 temp = carla.Transform(wp.transform.location, wp.transform.rotation)
