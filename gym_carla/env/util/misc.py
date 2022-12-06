@@ -41,7 +41,7 @@ def test_waypoint(waypoint, ego=False):
     # if waypoint.road_id in CURVE and waypoint.lane_id == 1:
     #     return True
     if not ego:
-        if (waypoint.road_id in ROADS or waypoint.road_id in DOUBLE_DIRECTION) and (waypoint.lane_id == -1 or waypoint.lane_id == -2 or waypoint.lane_id == -3):
+        if (waypoint.road_id in ROADS or waypoint.road_id in DISTURB_ROADS) and (waypoint.lane_id == -1 or waypoint.lane_id == -2 or waypoint.lane_id == -3):
             return True
         return False
     else:
@@ -85,10 +85,10 @@ def get_lane_center(map, location):
     lane_center = map.get_waypoint(location, project_to_road=True)
     road_id = lane_center.road_id
     lane_id = lane_center.lane_id
-    print('before process road_id and lane_id: ', road_id, lane_id)
+    # print('before process road_id and lane_id: ', road_id, lane_id)
     in_road = road_id in ROADS
 
-    if not in_road and road_id in DOUBLE_DIRECTION:
+    if not in_road and road_id in DISTURB_ROADS:
         # in a left+straight, get_right_lane = None, for example: road 2039 in Town05
         # """
         #     if ego vehicle not in the specific roads, we first get the right waypoint of lanecenter
@@ -102,13 +102,14 @@ def get_lane_center(map, location):
         # if lane_center.lane_id != -1:
         #     lane_center = lane_center.get_right_lane()
         lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Shoulder)
+        print('lane_shoulder', lane_shoulder, lane_shoulder.lane_id)
         lane_center_right = lane_shoulder.get_right_lane()
         lane_center_left = lane_shoulder.get_left_lane()
-        if lane_center_right.lane_id != -1 and lane_center_left != -1:
+        if (lane_center_right is None or lane_center_right.lane_id != -1) and (lane_center_left is None or lane_center_left.lane_id != -1):
             logging.error('get lane error!!')
-        elif lane_center_left == -1:
+        elif lane_center_left is not None and lane_center_left.lane_id == -1:
             lane_center = lane_center_left
-        elif lane_center_right == -1:
+        elif lane_center_right is not None and lane_center_right.lane_id == -1:
             lane_center = lane_center_right
 
     return lane_center

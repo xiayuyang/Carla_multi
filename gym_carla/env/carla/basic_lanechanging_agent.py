@@ -59,7 +59,7 @@ class Basic_Lanechanging_Agent(object):
         # check whether the autonomous vehicle is during a lane-changing behavior
         self.last_ego_state = FOLLOW
         self.last_lane_id = get_lane_center(self._map, self._vehicle_location).lane_id
-        self.lane_change = random.choice([-1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
+        self.lane_change = random.choice([CHANGE_LEFT, FOLLOW, CHANGE_RIGHT])
         self.autopilot_step = 0
 
         # set by carla_env.py
@@ -127,6 +127,15 @@ class Basic_Lanechanging_Agent(object):
         control.hand_brake = False
         return control
 
+    def calculate_distance_to_front(self, wps, vehicle):
+        if len(wps) == 0:
+            dis = 0
+        else:
+            dis = self._buffer_size
+        if vehicle is not None:
+            dis = self.compute_s_distance(wps, vehicle.get_location())
+        return dis
+
     def set_info(self, info_dict):
         """
         :param left_wps: waypoints in left-front lane
@@ -151,33 +160,15 @@ class Basic_Lanechanging_Agent(object):
         #     print(v)
         #     if v is not None:
         #         print(i, v.get_location())
-        print(len(self.left_wps), len(self.center_wps), len(self.right_wps), len(self.left_rear_wps),
+        print('the length of six waypoint queues: ', len(self.left_wps), len(self.center_wps), len(self.right_wps), len(self.left_rear_wps),
               len(self.center_rear_wps), len(self.right_rear_wps))
         # For simplicity, we compute s for front vehicles, and compute Euler distance for rear vehicles.
-        if len(self.left_wps) == 0 or self.vehicle_inlane[0] is None:
-            self.distance_to_left_front = self._buffer_size
-        else:
-            self.distance_to_left_front = self.compute_s_distance(self.left_wps, self.vehicle_inlane[0].get_location())
-        if len(self.center_wps) == 0 or self.vehicle_inlane[1] is None:
-            self.distance_to_center_front = self._buffer_size
-        else:
-            self.distance_to_center_front = self.compute_s_distance(self.center_wps, self.vehicle_inlane[1].get_location())
-        if len(self.right_wps) == 0 or self.vehicle_inlane[2] is None:
-            self.distance_to_right_front = self._buffer_size
-        else:
-            self.distance_to_right_front = self.compute_s_distance(self.right_wps, self.vehicle_inlane[2].get_location())
-        if len(self.left_rear_wps) == 0 or self.vehicle_inlane[3] is None:
-            self.distance_to_left_rear = self._buffer_size
-        else:
-            self.distance_to_left_rear = self.compute_s_distance(self.left_rear_wps, self.vehicle_inlane[3].get_location())
-        if len(self.center_rear_wps) == 0 or self.vehicle_inlane[4] is None:
-            self.distance_to_center_rear = self._buffer_size
-        else:
-            self.distance_to_center_rear = self.compute_s_distance(self.center_rear_wps, self.vehicle_inlane[4].get_location())
-        if len(self.right_rear_wps) == 0 or self.vehicle_inlane[5] is None:
-            self.distance_to_right_rear = self._buffer_size
-        else:
-            self.distance_to_right_rear = self.compute_s_distance(self.right_rear_wps, self.vehicle_inlane[5].get_location())
+        self.distance_to_left_front = self.calculate_distance_to_front(self.left_wps, self.vehicle_inlane[0])
+        self.distance_to_center_front = self.calculate_distance_to_front(self.center_wps, self.vehicle_inlane[1])
+        self.distance_to_right_front = self.calculate_distance_to_front(self.right_wps, self.vehicle_inlane[2])
+        self.distance_to_left_rear = self.calculate_distance_to_front(self.left_rear_wps, self.vehicle_inlane[3])
+        self.distance_to_center_rear = self.calculate_distance_to_front(self.center_rear_wps, self.vehicle_inlane[4])
+        self.distance_to_right_rear = self.calculate_distance_to_front(self.right_rear_wps, self.vehicle_inlane[5])
         # print("distance with six vehicles", 'distance_to_left_front: ', self.distance_to_left_front,
         #       'distance_to_center_front: ', self.distance_to_center_front,
         #       'distance_to_right_front: ', self.distance_to_right_front,
@@ -188,12 +179,12 @@ class Basic_Lanechanging_Agent(object):
         # self.distance_to_center_rear = self._vehicle.get_location().distance(self.vehicle_inlane[4].get_location())
         # self.distance_to_right_rear = self._vehicle.get_location().distance(self.vehicle_inlane[5].get_location())
         # set next waypoint that distance == 2m
-        if len(self.left_wps) != 0:
-            self.left_next_wayppoint = self.left_wps[1]
-        if len(self.center_wps) != 0:
-            self.center_next_waypoint = self.center_wps[1]
-        if len(self.right_wps) != 0:
-            self.right_next_waypoint = self.right_wps[1]
+        # if len(self.left_wps) != 0:
+        #     self.left_next_wayppoint = self.left_wps[1]
+        # if len(self.center_wps) != 0:
+        #     self.center_next_waypoint = self.center_wps[1]
+        # if len(self.right_wps) != 0:
+        #     self.right_next_waypoint = self.right_wps[1]
         if self._ignore_change_gap:
             self.enable_left_change = True
             self.enable_right_change = True
