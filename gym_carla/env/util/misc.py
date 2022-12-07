@@ -65,6 +65,14 @@ def draw_waypoints(world, waypoints, life_time=0.0, z=0.5):
         end = begin + carla.Location(x=math.cos(angle), y=math.sin(angle))
         world.debug.draw_arrow(begin, end, arrow_size=0.3, life_time=life_time)
 
+def fill_action_param(action, steer, throttle_brake, sigma):
+    action_param = []
+    for i in range(6):
+        action_param.append(np.clip(np.random.normal(0, sigma), -1, 1))
+    action_param[action_param*2] = steer
+    action_param[action_param*2+1] = throttle_brake
+    return action_param
+
 def get_lane_center(map, location):
     """Project current loction to its lane center, return lane center waypoint"""
     # test code for junction lane invasion bug
@@ -85,7 +93,7 @@ def get_lane_center(map, location):
     lane_center = map.get_waypoint(location, project_to_road=True)
     road_id = lane_center.road_id
     lane_id = lane_center.lane_id
-    print('before process road_id and lane_id: ', road_id, lane_id)
+    # print('before process road_id and lane_id: ', road_id, lane_id)
     in_road = road_id in ROADS
 
     if road_id in DISTURB_ROADS:
@@ -102,18 +110,18 @@ def get_lane_center(map, location):
         # if lane_center.lane_id != -1:
         #     lane_center = lane_center.get_right_lane()
         lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Sidewalk)
-        print('lane_shoulder', lane_shoulder, lane_shoulder.lane_id)
+        print('lane_shoulder, lane_shoulder.lane_id, road_id, lane_id: ', lane_shoulder, lane_shoulder.lane_id, road_id, lane_id)
         if lane_shoulder.lane_id == -1:
             lane_center_right = lane_shoulder.get_right_lane()
             lane_center_left = lane_shoulder.get_left_lane()
-            if lane_center_right is not None:
-                print('lane_center_right', lane_center_right, lane_center_right.lane_id)
-            else:
-                print('right is None')
-            if lane_center_left is not None:
-                print('lane_center_left', lane_center_left, lane_center_left.lane_id)
-            else:
-                print('left is None')
+            # if lane_center_right is not None:
+            #     print('lane_center_right', lane_center_right, lane_center_right.lane_id)
+            # else:
+            #     print('right is None')
+            # if lane_center_left is not None:
+            #     print('lane_center_left', lane_center_left, lane_center_left.lane_id)
+            # else:
+            #     print('left is None')
             if (lane_center_right is None or lane_center_right.lane_id != -1) and (lane_center_left is None or lane_center_left.lane_id != -1):
                 logging.error('get lane error!!')
             elif lane_center_left is not None and lane_center_left.lane_id == -1:
@@ -121,11 +129,11 @@ def get_lane_center(map, location):
             elif lane_center_right is not None and lane_center_right.lane_id == -1:
                 lane_center = lane_center_right
         elif lane_shoulder.lane_id == -5:
-            print('lane_shoulder.lane_id == -5')
+            # print('lane_shoulder.lane_id == -5')
             lane_center = lane_shoulder.get_left_lane().get_left_lane().get_left_lane().get_left_lane()
-        # elif lane_shoulder.lane_id == -6:
-        #     print('lane_shoulder.lane_id == -5')
-        #     lane_center = lane_shoulder.get_left_lane().get_left_lane().get_left_lane().get_left_lane().get_left_lane()
+        elif lane_shoulder.lane_id == -6:
+            # print('lane_shoulder.lane_id == -6')
+            lane_center = lane_shoulder.get_left_lane().get_left_lane().get_left_lane().get_left_lane().get_left_lane()
 
     return lane_center
 

@@ -8,6 +8,7 @@ from algs.pdqn import P_DQN
 from gym_carla.env.settings import ARGS
 from gym_carla.env.carla_env import CarlaEnv
 from process import start_process, kill_process
+from gym_carla.env.util.misc import fill_action_param
 
 # neural network hyper parameters
 SIGMA = 0.5
@@ -90,10 +91,11 @@ def main():
                                     throttle_brake = -info['Brake'] if info['Brake'] > 0 else info['Throttle']
                                     action = info['Change']
                                     action_param = np.array([[info['Steer'], throttle_brake]])
-                                    agent.replay_buffer.add(state, action, action_param, reward, next_state, truncated, done, info)
+                                    saved_action_param = fill_action_param(action, info['Steer'], throttle_brake, SIGMA)
+                                    agent.replay_buffer.add(state, action, saved_action_param, reward, next_state, truncated, done, info)
                                 else:
                                     # Input the agent action to replay buffer
-                                    agent.replay_buffer.add(state, action, action_param, reward, next_state, truncated, done, info)
+                                    agent.replay_buffer.add(state, action, all_action_param, reward, next_state, truncated, done, info)
                                 print(f"state -- vehicle_info:{state['vehicle_info']}\n"
                                       f"waypoints:{state['left_waypoints']}, \n"
                                       f"waypoints:{state['center_waypoints']}, \n"
@@ -106,6 +108,7 @@ def main():
                                       f"ego_vehicle:{next_state['ego_vehicle']}\n"
                                       f"action:{action}\n"
                                       f"action_param:{action_param}\n"
+                                      f"all_action_param:{all_action_param}\n"
                                       f"reward:{reward}\n"
                                       f"truncated:{truncated}, done:{done}")
                                 print()

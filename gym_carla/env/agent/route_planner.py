@@ -70,6 +70,9 @@ class GlobalPlanner:
 
         return spawn_points
 
+    def split_spawn_points(self, spawn_points):
+        pass
+
     def _build_route(self):
         begin_1 = self._topology[0]
         begin_2 = self._topology[1]
