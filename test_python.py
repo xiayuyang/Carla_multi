@@ -49,3 +49,10 @@ import torch
 # q = [1.2, 2.3, 4.5]
 # action = np.argmax(q)
 # print(action)
+
+
+# a=[None for i in range(4)]
+# print(a)
+
+a=abs(0.01)
+print(a)

@@ -1,4 +1,4 @@
-import os,psutil,time
+import os, psutil, time
 import subprocess
 from gym_carla.env.settings import CARLA_PATH
 
@@ -40,5 +40,5 @@ def start_process():
     # Kill Carla processes if there are any and start simulator
     print('Starting Carla...')
     kill_process()
-    subprocess.Popen(get_exec_command()[1],cwd=CARLA_PATH, shell=True)
+    subprocess.Popen(get_exec_command()[1], cwd=CARLA_PATH, shell=True)
     time.sleep(5)

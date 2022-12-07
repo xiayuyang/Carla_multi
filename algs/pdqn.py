@@ -11,27 +11,86 @@ class ReplayBuffer:
 
     def __init__(self, capacity) -> None:
         self.buffer = collections.deque(maxlen=capacity)  # 队列，先进先出
+        self.change_buffer = collections.deque(maxlen=capacity//10)
+        self.tmp_buffer = collections.deque(maxlen=10)
         self.number = 0
         # self.all_buffer = np.zeros((1000000, 66), dtype=np.float32)
-        with open('./out/replay_buffer_test.txt', 'w') as f:
-            pass
+        # with open('./out/replay_buffer_test.txt', 'w') as f:
+        #     pass
 
-    def add(self, state, action, action_param, reward, next_state, truncated, done, info):
+    def add(self, state, action, reward, next_state, truncated, done, info):
         # first compress state info, then add
         state = self._compress(state)
         next_state = self._compress(next_state)
-        self.buffer.append((state, action, action_param, reward, next_state, truncated, done))
-        # reward_ttc = info["TTC"]
-        # reward_com = info["Comfort"]
-        # reward_eff = info["velocity"]
-        # reward_lan = info["offlane"]
-        # reward_yaw = info["yaw_diff"]
+        self.tem_buffer.append((state, action, reward, next_state, truncated, done))
+        if abs(info['lane_changing_reward']) > 0.1:
+            for buf in self.tmp_buffer:
+                self.change_buffer.append(buf)
+        self.buffer.append((state, action, reward, next_state, truncated, done))
+        reward_ttc = info["TTC"]
+        reward_com = info["Comfort"]
+        reward_eff = info["velocity"]
+        reward_lan = info["offlane"]
+        reward_yaw = info["yaw_diff"]
+        reward_list = np.array([[reward, reward_ttc, reward_com, reward_eff, reward_lan, reward_yaw]])
+        print("reward_eff: ", reward_eff)
+        # print("their shapes", state, action, next_state, reward_list, truncated, done)
+        # state: [1, 28], action: [1, 2], next_state: [1, 28], reward_list = [1, 6], truncated = [1, 1], done = [1, 1]
+        # all: [1, 66]
+        if truncated == False or truncated == 0:
+            truncated = 0
+        else:
+            truncated = 1
+        if done == False or done == 0:
+            done = 0
+        else:
+            done = 1
+        # self.save_all(state, action, next_state, reward_list, np.array([truncated]), np.array([done]))
+        # with open('./out/replay_buffer_test.txt','ab') as f:
+        #     np.savetxt(f, state, delimiter=',')
+        #     np.savetxt(f, action, delimiter=',')
+        #     np.savetxt(f, np.array([reward]), delimiter=',')
+        #     np.savetxt(f, next_state, delimiter=',')
+        #     np.savetxt(f, np.array([truncated]), delimiter=',')
+        #     np.savetxt(f, np.array([done]), delimiter=',')
+        # np.save("./pre_train/state"+str(self.number)+".npy", np.array(state))
+        # np.save("./pre_train/action" + str(self.number) + ".npy", np.array(action))
+        # np.save("./pre_train/reward" + str(self.number) + ".npy", np.array(reward_list))
+        # np.save("./pre_train/next_state" + str(self.number) + ".npy", np.array(next_state))
+        # np.save("./pre_train/truncated" + str(self.number) + ".npy", np.array([truncated]))
+        # np.save("./pre_train/done" + str(self.number) + ".npy", np.array([done]))
+
+
+    def save_all(self, state, action, next_state, reward_list, truncated, done):
+        if self.number < 1000000:
+            state_ = np.reshape(state, (-1, 1))
+            action_ = np.reshape(action, (-1, 1))
+            next_state_ = np.reshape(next_state, (-1, 1))
+            reward_list_ = np.reshape(reward_list, (-1, 1))
+            truncated_ = np.reshape(truncated, (-1, 1))
+            done_ = np.reshape(done, (-1, 1))
+            all_feature = np.concatenate((state_, action_, next_state_, reward_list_, truncated_, done_), axis=0)
+            self.all_buffer[self.number, :] = np.squeeze(all_feature)
+            self.number = self.number + 1
+        if self.number == 1000000:
+            np.save("./out/all_replay_buffer.npy", self.all_buffer)
+            self.number = self.number + 1
 
 
     def sample(self, batch_size):  # 从buffer中采样数据,数量为batch_size
-        transition = random.sample(self.buffer, batch_size)
-        state, action, action_param, reward, next_state, truncated, done = zip(*transition)
-        return state, action, action_param, reward, next_state, truncated, done
+        pri_size = min(batch_size // 5, len(self.change_buffer))
+        normal_size = batch_size - pri_size
+        transition = random.sample(self.buffer, normal_size)
+        state, action, reward, next_state, truncated, done = zip(*transition)
+        pri_transition = random.sample(self.change_buffer, pri_size)
+        pri_state, pri_action, pri_reward, pri_next_state, pri_truncated, pri_done = zip(*pri_transition)
+        state = np.concatenate((state, pri_state), axis=0)
+        action = np.concatenate((action, pri_action), axis=0)
+        reward = np.concatenate((reward, pri_reward), axis=0)
+        next_state = np.concatenate((next_state, pri_next_state), axis=0)
+        truncated = np.concatenate((truncated, pri_truncated), axis=0)
+        done = np.concatenate((done, pri_done), axis=0)
+        return state, action, reward, next_state, truncated, done
 
     def size(self):
         return len(self.buffer)
@@ -171,9 +230,9 @@ class P_DQN:
         self.action_parameter_size = int(self.action_parameter_sizes.sum())
         self.action_parameter_offsets = self.action_parameter_sizes.cumsum()
         self.action_parameter_offsets = np.insert(self.action_parameter_offsets, 0, 0)  # [0, self.a_dim, self.a_dim*2, self.a_dim*3]
-        self.action_parameter_max_numpy = [1, 1, 1]
-        self.action_parameter_min_numpy = [-1, -1, -1]
-        self.action_parameter_range_numpy = [2, 2, 2]
+        self.action_parameter_max_numpy = np.array([1, 1, 1, 1, 1, 1])
+        self.action_parameter_min_numpy = np.array([-1, -1, -1, -1, -1, -1])
+        self.action_parameter_range_numpy = np.array([2, 2, 2, 2, 2, 2])
         self.gamma, self.tau, self.sigma, self.epsilon = gamma, tau, sigma, epsilon  # sigma:高斯噪声的标准差，均值直接设置为0
         self.buffer_size, self.batch_size, self.device = buffer_size, batch_size, device
         self.actor_lr, self.critic_lr = actor_lr, critic_lr
@@ -271,9 +330,9 @@ class P_DQN:
 
     def _invert_gradients(self, grad, vals, grad_type, inplace=True):
         if grad_type == "action_parameters":
-            max_p = self.action_parameter_max_numpy
-            min_p = self.action_parameter_min_numpy
-            rnge = self.action_parameter_range_numpy
+            max_p = torch.from_numpy(self.action_parameter_max_numpy)
+            min_p = torch.from_numpy(self.action_parameter_min_numpy)
+            rnge = torch.from_numpy(self.action_parameter_range_numpy)
         else:
             raise ValueError("Unhandled grad_type: '"+str(grad_type) + "'")
 
@@ -305,7 +364,7 @@ class P_DQN:
         # 此处得到的batch是否是pytorch.tensor?
         batch_s = torch.tensor(b_s, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
         batch_ns = torch.tensor(b_ns, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
-        batch_a = torch.tensor(b_a, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
+        batch_a = torch.tensor(b_a, dtype=torch.int64).view((self.batch_size, -1)).to(self.device)
         batch_a_param = torch.tensor(b_a_param, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
         batch_r = torch.tensor(b_r, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
         batch_d = torch.tensor(b_d, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
@@ -318,7 +377,7 @@ class P_DQN:
             q_targets = batch_r + self.gamma * q_prime * (1 - batch_t)
 
         q_values = self.critic(batch_s, batch_a_param)
-        q = q_values.gather(1, batch_a.view(-1, 1)).squeeze()
+        q = q_values.gather(1, batch_a).squeeze()
         loss_q = self.loss(q, q_targets)
 
         self.critic_optimizer.zero_grad()

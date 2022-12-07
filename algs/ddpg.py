@@ -10,15 +10,21 @@ class ReplayBuffer:
 
     def __init__(self, capacity) -> None:
         self.buffer = collections.deque(maxlen=capacity)  # 队列，先进先出
+        self.change_buffer = collections.deque(maxlen=capacity//10)
+        self.tmp_buffer = collections.deque(maxlen=10)
         self.number = 0
         # self.all_buffer = np.zeros((1000000, 66), dtype=np.float32)
-        with open('./out/replay_buffer_test.txt', 'w') as f:
-            pass
+        # with open('./out/replay_buffer_test.txt', 'w') as f:
+        #     pass
 
     def add(self, state, action, reward, next_state, truncated, done, info):
         # first compress state info, then add
         state = self._compress(state)
         next_state = self._compress(next_state)
+        self.tem_buffer.append((state, action, reward, next_state, truncated, done))
+        if abs(info['lane_changing_reward']) > 0.1:
+            for buf in self.tmp_buffer:
+                self.change_buffer.append(buf)
         self.buffer.append((state, action, reward, next_state, truncated, done))
         reward_ttc = info["TTC"]
         reward_com = info["Comfort"]
@@ -71,8 +77,18 @@ class ReplayBuffer:
 
 
     def sample(self, batch_size):  # 从buffer中采样数据,数量为batch_size
-        transition = random.sample(self.buffer, batch_size)
+        pri_size = min(batch_size // 5, len(self.change_buffer))
+        normal_size = batch_size - pri_size
+        transition = random.sample(self.buffer, normal_size)
         state, action, reward, next_state, truncated, done = zip(*transition)
+        pri_transition = random.sample(self.change_buffer, pri_size)
+        pri_state, pri_action, pri_reward, pri_next_state, pri_truncated, pri_done = zip(*pri_transition)
+        state = np.concatenate((state, pri_state), axis=0)
+        action = np.concatenate((action, pri_action), axis=0)
+        reward = np.concatenate((reward, pri_reward), axis=0)
+        next_state = np.concatenate((next_state, pri_next_state), axis=0)
+        truncated = np.concatenate((truncated, pri_truncated), axis=0)
+        done = np.concatenate((done, pri_done), axis=0)
         return state, action, reward, next_state, truncated, done
 
     def size(self):
