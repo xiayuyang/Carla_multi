@@ -21,7 +21,7 @@ class ReplayBuffer:
         # first compress state info, then add
         state = self._compress(state)
         next_state = self._compress(next_state)
-        self.tem_buffer.append((state, action, reward, next_state, truncated, done))
+        self.tmp_buffer.append((state, action, reward, next_state, truncated, done))
         if abs(info['lane_changing_reward']) > 0.1:
             for buf in self.tmp_buffer:
                 self.change_buffer.append(buf)
