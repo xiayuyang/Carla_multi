@@ -17,68 +17,33 @@ class ReplayBuffer:
         # self.all_buffer = np.zeros((1000000, 66), dtype=np.float32)
         # with open('./out/replay_buffer_test.txt', 'w') as f:
         #     pass
-
+    # TODO
     def add(self, state, action, reward, next_state, truncated, done, info):
         # first compress state info, then add
         state = self._compress(state)
         next_state = self._compress(next_state)
+        lane_center = info["offlane"]
+        reward_ttc = info["TTC"]
+        if reward_ttc < -0.1:
+            self.change_buffer.append((state, action, reward, next_state, truncated, done))
+        if lane_center > 1.0:
+            self.change_buffer.append((state, action, reward, next_state, truncated, done))
         self.tem_buffer.append((state, action, reward, next_state, truncated, done))
         if abs(info['lane_changing_reward']) > 0.1:
             for buf in self.tmp_buffer:
                 self.change_buffer.append(buf)
         self.buffer.append((state, action, reward, next_state, truncated, done))
-        reward_ttc = info["TTC"]
         reward_com = info["Comfort"]
         reward_eff = info["velocity"]
-        reward_lan = info["offlane"]
+
         reward_yaw = info["yaw_diff"]
-        reward_list = np.array([[reward, reward_ttc, reward_com, reward_eff, reward_lan, reward_yaw]])
-        print("reward_eff: ", reward_eff)
         # print("their shapes", state, action, next_state, reward_list, truncated, done)
         # state: [1, 28], action: [1, 2], next_state: [1, 28], reward_list = [1, 6], truncated = [1, 1], done = [1, 1]
         # all: [1, 66]
-        if truncated == False or truncated == 0:
-            truncated = 0
-        else:
-            truncated = 1
-        if done == False or done == 0:
-            done = 0
-        else:
-            done = 1
-        # self.save_all(state, action, next_state, reward_list, np.array([truncated]), np.array([done]))
-        # with open('./out/replay_buffer_test.txt','ab') as f:
-        #     np.savetxt(f, state, delimiter=',')
-        #     np.savetxt(f, action, delimiter=',')
-        #     np.savetxt(f, np.array([reward]), delimiter=',')
-        #     np.savetxt(f, next_state, delimiter=',')
-        #     np.savetxt(f, np.array([truncated]), delimiter=',')
-        #     np.savetxt(f, np.array([done]), delimiter=',')
-        # np.save("./pre_train/state"+str(self.number)+".npy", np.array(state))
-        # np.save("./pre_train/action" + str(self.number) + ".npy", np.array(action))
-        # np.save("./pre_train/reward" + str(self.number) + ".npy", np.array(reward_list))
-        # np.save("./pre_train/next_state" + str(self.number) + ".npy", np.array(next_state))
-        # np.save("./pre_train/truncated" + str(self.number) + ".npy", np.array([truncated]))
-        # np.save("./pre_train/done" + str(self.number) + ".npy", np.array([done]))
-
-
-    def save_all(self, state, action, next_state, reward_list, truncated, done):
-        if self.number < 1000000:
-            state_ = np.reshape(state, (-1, 1))
-            action_ = np.reshape(action, (-1, 1))
-            next_state_ = np.reshape(next_state, (-1, 1))
-            reward_list_ = np.reshape(reward_list, (-1, 1))
-            truncated_ = np.reshape(truncated, (-1, 1))
-            done_ = np.reshape(done, (-1, 1))
-            all_feature = np.concatenate((state_, action_, next_state_, reward_list_, truncated_, done_), axis=0)
-            self.all_buffer[self.number, :] = np.squeeze(all_feature)
-            self.number = self.number + 1
-        if self.number == 1000000:
-            np.save("./out/all_replay_buffer.npy", self.all_buffer)
-            self.number = self.number + 1
 
 
     def sample(self, batch_size):  # 从buffer中采样数据,数量为batch_size
-        pri_size = min(batch_size // 5, len(self.change_buffer))
+        pri_size = min(batch_size // 4, len(self.change_buffer))
         normal_size = batch_size - pri_size
         transition = random.sample(self.buffer, normal_size)
         state, action, reward, next_state, truncated, done = zip(*transition)

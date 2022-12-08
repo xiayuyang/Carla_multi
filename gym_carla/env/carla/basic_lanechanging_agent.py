@@ -300,7 +300,7 @@ class Basic_Lanechanging_Agent(object):
             control = self.add_emergency_stop(control)
         print('basic_lanechanging_agent: current lane, target_lane, new_target_lane, last_action, new_action: ',
               current_lane, target_lane, new_target_lane, last_action, new_action)
-        return control, new_target_lane, new_action, [self.distance_to_left_front, self.distance_to_center_front, self.distance_to_right_front]
+        return control, new_target_lane, new_action, [self.distance_to_left_front, self.distance_to_center_front, self.distance_to_right_front], [self.distance_to_left_rear, self.distance_to_center_rear, self.distance_to_right_rear]
 
     def ignore_traffic_lights(self, active=True):
         """(De)activates the checks for traffic lights"""

@@ -90,7 +90,7 @@ def get_lane_center(map, location):
     #     shoulder = map.get_waypoint(location, project_to_road=True,lane_type=carla.LaneType.Shoulder)
     #     lane_center = shoulder.get_left_lane()
 
-    lane_center = map.get_waypoint(location, project_to_road=True)
+    lane_center = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Driving)
     road_id = lane_center.road_id
     lane_id = lane_center.lane_id
     # print('before process road_id and lane_id: ', road_id, lane_id)
@@ -109,9 +109,9 @@ def get_lane_center(map, location):
         # lane_center = right.get_left_lane()
         # if lane_center.lane_id != -1:
         #     lane_center = lane_center.get_right_lane()
-        lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Sidewalk)
+        lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Shoulder)
         print('lane_shoulder, lane_shoulder.lane_id, road_id, lane_id: ', lane_shoulder, lane_shoulder.lane_id, road_id, lane_id)
-        if lane_shoulder.lane_id == -1:
+        if lane_shoulder.lane_id == 1:
             lane_center_right = lane_shoulder.get_right_lane()
             lane_center_left = lane_shoulder.get_left_lane()
             # if lane_center_right is not None:
@@ -124,6 +124,13 @@ def get_lane_center(map, location):
             #     print('left is None')
             if (lane_center_right is None or lane_center_right.lane_id != -1) and (lane_center_left is None or lane_center_left.lane_id != -1):
                 logging.error('get lane error!!')
+                lane_Sidewalk = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Sidewalk)
+                if lane_Sidewalk.lane_id == -5:
+                    # print('lane_shoulder.lane_id == -5')
+                    lane_center = lane_Sidewalk.get_left_lane().get_left_lane().get_left_lane().get_left_lane()
+                elif lane_Sidewalk.lane_id == -6:
+                    # print('lane_shoulder.lane_id == -6')
+                    lane_center = lane_Sidewalk.get_left_lane().get_left_lane().get_left_lane().get_left_lane().get_left_lane()
             elif lane_center_left is not None and lane_center_left.lane_id == -1:
                 lane_center = lane_center_left
             elif lane_center_right is not None and lane_center_right.lane_id == -1:

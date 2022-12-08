@@ -90,7 +90,7 @@ ARGS.add_argument(
 ARGS.add_argument(
     '-n', '--num_of_vehicles', type=list,
     help='Total vehicles number which run in simulation',
-    default=[20*3, 25*3])
+    default=[10*3, 15*3, 20*3, 25*3])
 ARGS.add_argument(
     '-sa', '--sampling_resolution', type=float,
     help='Distance between generated two waypoints',
@@ -134,7 +134,7 @@ ARGS.add_argument(
     help='reward penalty for simulation terminated early on account of collision and lane invasion')
 ARGS.add_argument(
     '--lane_change_reward', type=float,
-    default=20,
+    default=30,
     help='reward for lane change according to the distance to the preceding vehicle')
 ARGS.add_argument(
     '--speed_limit', type=float,
@@ -163,7 +163,7 @@ ARGS.add_argument(
     help='Brake bound for ego vehicle controller')
 ARGS.add_argument(
     '--switch_threshold', type=int,
-    default=20,
+    default=2,
     help='Let the TM controller control 1 episode after basic_agent controller control switch_threshold episodes'
 )
 ARGS.add_argument(
@@ -181,3 +181,7 @@ ARGS.add_argument(
     default=2.0,
     help='Min distance between two vehicles, unit -- meters'
 )
+ARGS.add_argument(
+    '--guide_change', type=bool,
+    default=True,
+    help='guide the vehicle to change via lane_center')

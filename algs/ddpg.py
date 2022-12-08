@@ -22,16 +22,21 @@ class ReplayBuffer:
         state = self._compress(state)
         next_state = self._compress(next_state)
         self.tmp_buffer.append((state, action, reward, next_state, truncated, done))
+        lane_center = info["offlane"]
+        reward_ttc = info["TTC"]
+        if reward_ttc < -0.1:
+            self.change_buffer.append((state, action, reward, next_state, truncated, done))
+        if lane_center > 1.0:
+            self.change_buffer.append((state, action, reward, next_state, truncated, done))
         if abs(info['lane_changing_reward']) > 0.1:
             for buf in self.tmp_buffer:
                 self.change_buffer.append(buf)
         self.buffer.append((state, action, reward, next_state, truncated, done))
-        reward_ttc = info["TTC"]
         reward_com = info["Comfort"]
+
         reward_eff = info["velocity"]
-        reward_lan = info["offlane"]
         reward_yaw = info["yaw_diff"]
-        reward_list = np.array([[reward, reward_ttc, reward_com, reward_eff, reward_lan, reward_yaw]])
+        # reward_list = np.array([[reward, reward_ttc, reward_com, reward_eff, reward_lan, reward_yaw]])
         print("reward_eff: ", reward_eff)
         # print("their shapes", state, action, next_state, reward_list, truncated, done)
         # state: [1, 28], action: [1, 2], next_state: [1, 28], reward_list = [1, 6], truncated = [1, 1], done = [1, 1]
@@ -77,7 +82,7 @@ class ReplayBuffer:
 
 
     def sample(self, batch_size):  # 从buffer中采样数据,数量为batch_size
-        pri_size = min(batch_size // 5, len(self.change_buffer))
+        pri_size = min(batch_size // 4, len(self.change_buffer))
         normal_size = batch_size - pri_size
         transition = random.sample(self.buffer, normal_size)
         state, action, reward, next_state, truncated, done = zip(*transition)
@@ -571,7 +576,7 @@ class DDPG:
         self.replace_a = 0
         self.replace_c = 0
         self.s_dim = state_dim  # state_dim here is a dict
-        self.s_dim['waypoints'] *= 2  # 2 is the feature dim of each waypoint
+        self.s_dim['waypoints'] *= 3  # 2 is the feature dim of each waypoint
         self.a_dim, self.a_bound = action_dim, action_bound
         self.theta = theta
         self.gamma, self.tau, self.sigma, self.epsilon = gamma, tau, sigma, epsilon  # sigma:高斯噪声的标准差，均值直接设置为0
@@ -671,7 +676,7 @@ class DDPG:
                 td_max = abs(q_[i]-q_targets[i])
                 index = i
         print(f'TD-error:{critic_loss}', td_max, index)
-        print(batch_s[index], batch_ns[index], batch_a[index], batch_r[index], batch_t[index])
+        # print(batch_s[index], batch_ns[index], batch_a[index], batch_r[index], batch_t[index])
         self.critic_optimizer.zero_grad()
         critic_loss.backward()
         if self.clip_grad > 0:

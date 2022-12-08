@@ -93,19 +93,19 @@ def main():
                                 else:
                                     # Input the agent action to replay buffer
                                     agent.replay_buffer.add(state, action, reward, next_state, truncated, done, info)
-                                # print(f"state -- vehicle_info:{state['vehicle_info']}\n"
-                                #       f"waypoints:{state['left_waypoints']}, \n"
-                                #       f"waypoints:{state['center_waypoints']}, \n"
-                                #       f"waypoints:{state['right_waypoints']}, \n"
-                                #       f"ego_vehicle:{state['ego_vehicle']}, \n"
-                                #       f"next_state -- vehicle_info:{next_state['vehicle_info']}\n"
-                                #       f"waypoints:{next_state['left_waypoints']}, \n"
-                                #       f"waypoints:{next_state['center_waypoints']}, \n"
-                                #       f"waypoints:{next_state['right_waypoints']}, \n"
-                                #       f"ego_vehicle:{next_state['ego_vehicle']}\n"
-                                #       f"action:{action}\n"
-                                #       f"reward:{reward}\n"
-                                #       f"truncated:{truncated}, done:{done}")
+                                print(f"state -- vehicle_info:{state['vehicle_info']}\n"
+                                      f"waypoints:{state['left_waypoints']}, \n"
+                                      f"waypoints:{state['center_waypoints']}, \n"
+                                      f"waypoints:{state['right_waypoints']}, \n"
+                                      f"ego_vehicle:{state['ego_vehicle']}, \n"
+                                      f"next_state -- vehicle_info:{next_state['vehicle_info']}\n"
+                                      f"waypoints:{next_state['left_waypoints']}, \n"
+                                      f"waypoints:{next_state['center_waypoints']}, \n"
+                                      f"waypoints:{next_state['right_waypoints']}, \n"
+                                      f"ego_vehicle:{next_state['ego_vehicle']}\n"
+                                      f"action:{action}\n"
+                                      f"reward:{reward}\n"
+                                      f"truncated:{truncated}, done:{done}")
                                 print()
 
                             if agent.replay_buffer.size() > MINIMAL_SIZE:
@@ -122,7 +122,7 @@ def main():
                                 agent.save_net('./out/ddpg_pre_trained.pth')
 
                             if env.rl_control_step > 10000 and env.is_effective_action() and \
-                                    env.RL_switch and SIGMA > 0.01:
+                                    env.RL_switch and SIGMA > 0.05:
                                 globals()['SIGMA'] *= SIGMA_DECAY
                                 agent.set_sigma(SIGMA)
 

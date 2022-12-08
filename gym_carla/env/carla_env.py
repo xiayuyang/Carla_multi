@@ -52,6 +52,7 @@ class CarlaEnv:
         self.vehicle_proximity = args.vehicle_proximity
         self.hybrid = args.hybrid
         self.auto_lanechange = args.auto_lane_change
+        self.guide_change = args.guide_change
         self.stride = args.stride
         self.buffer_size = args.buffer_size
         self.pre_train_steps = args.pre_train_steps
@@ -108,6 +109,7 @@ class CarlaEnv:
         self.new_action = None
 
         self.distance_to_front_vehicles = [50, 50, 50]
+        self.distance_to_rear_vehicles = [50, 50, 50]
 
         self.calculate_impact = None
 
@@ -260,7 +262,7 @@ class CarlaEnv:
         'ignore_stop_signs': True, 'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
         'sampling_radius': self.sampling_resolution, 'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,
         'max_brake': self.brake_bound, 'buffer_size': self.buffer_size, 'ignore_front_vehicle': random.choice([True, False]),
-        'ignore_change_gap': random.choice([True, False, False]), 'lanechanging_fps': random.choice([40, 50, 60, 70, 80, 90, 100])})
+        'ignore_change_gap': random.choice([True, False, False]), 'lanechanging_fps': random.choice([40, 50, 60])})
 
 
         # code for synchronous mode
@@ -381,7 +383,7 @@ class CarlaEnv:
             # control = self.autopilot_controller.run_step()
             print("1.current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                   self.target_lane, self.new_target_lane, self.last_action, self.new_action)
-            control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles = self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action)
+            control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action)
             print("1.current lane, target lane, new_target_lane, last action, new action: ", self.current_lane, self.target_lane, self.new_target_lane, self.last_action, self.new_action)
             self.target_lane = self.new_target_lane
             self.last_action = self.new_action
@@ -477,16 +479,15 @@ class CarlaEnv:
 
             if self.ego_vehicle.get_location().distance(self.former_wp.transform.location) >= self.sampling_resolution:
                 self.former_wp = self.next_wps[0]
-
-            """Attention: The sequence of following code is pivotal, do not recklessly chage their execution order"""
-            reward = self._get_reward(self.last_action, last_lane, self.current_lane, self.distance_to_front_vehicles)
-            state = self._get_state({'state_waypoints': self.state_waypoints, 'vehicle_inlane': self.vehicle_inlane})
-            self.step_info.update({'Reward': reward})
-            self.last_acc = self.ego_vehicle.get_acceleration()
             if self.vehicle_inlane[4] is not None:
                 self.rear_vel_deque.append(get_speed(self.vehicle_inlane[4], False))
             else:
                 self.rear_vel_deque.append(-1)
+            """Attention: The sequence of following code is pivotal, do not recklessly chage their execution order"""
+            reward = self._get_reward(self.last_action, last_lane, self.current_lane, self.distance_to_front_vehicles, self.distance_to_rear_vehicles)
+            state = self._get_state({'state_waypoints': self.state_waypoints, 'vehicle_inlane': self.vehicle_inlane})
+            self.step_info.update({'Reward': reward})
+            self.last_acc = self.ego_vehicle.get_acceleration()
         else:
             temp = self.world.wait_for_tick()
             self.world.on_tick(lambda _: {})
@@ -539,19 +540,25 @@ class CarlaEnv:
     def render(self, mode):
         pass
 
-    def process_lane_wp(self, wps_list, ego_vehicle_z, ego_forward_vector, my_sample_ratio):
+    def process_lane_wp(self, wps_list, ego_vehicle_z, ego_forward_vector, my_sample_ratio, flag, t):
         wps = []
         idx = 0
+        final_t = t
+        if flag == -1:
+            final_t = 1.5 + t
+        elif flag == 1:
+            final_t = 1.5 - t
+
         for wp in wps_list:
             delta_z = wp.transform.location.z - ego_vehicle_z
-            yaw_diff = math.degrees(get_yaw_diff(wp.transform.get_forward_vector(),ego_forward_vector))
+            yaw_diff = math.degrees(get_yaw_diff(wp.transform.get_forward_vector(), ego_forward_vector))
             yaw_diff = yaw_diff / 90
             if idx % my_sample_ratio == my_sample_ratio-1:
-                wps.append([delta_z/3, yaw_diff])
+                wps.append([delta_z/3, yaw_diff, final_t])
             idx = idx + 1
         return np.array(wps)
 
-    def process_veh(self, vehicle_inlane, left, right):
+    def process_veh(self, vehicle_inlane, left_wall, right_wall):
         ego_speed = get_speed(self.ego_vehicle, False)
         ego_location = self.ego_vehicle.get_location()
         # print('5')
@@ -564,12 +571,12 @@ class CarlaEnv:
         for i in range(6):
             veh = vehicle_inlane[i]
             wall = False
-            if left and (i == 0 or i == 3):
+            if left_wall and (i == 0 or i == 3):
                 wall = True
-            if right and (i == 2 or i == 5):
+            if right_wall and (i == 2 or i == 5):
                 wall = True
             if wall:
-                v_info = [0, ego_speed/max_speed, 0]
+                v_info = [0, 0, 0]
             else:
                 if veh is None:
                     v_info = [1, 0, 0]
@@ -624,25 +631,29 @@ class CarlaEnv:
         #     gap = self.buffer_size - len(wps)
         #     for _ in range(gap):
         #         wps.append([(len(wps) + 1) * self.sampling_resolution / wps_length, 0])
+        lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
+        right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
+        t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
+
         ego_vehicle_z = get_lane_center(self.map, self.ego_vehicle.get_location()).transform.location.z
         ego_forward_vector = self.ego_vehicle.get_transform().get_forward_vector()
         my_sample_ratio = self.buffer_size // 10
-        center_wps_processed = self.process_lane_wp(center_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio)
+        center_wps_processed = self.process_lane_wp(center_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 0, t)
         if len(left_wps) == 0:
             left_wps_processed = center_wps_processed.copy()
         else:
-            left_wps_processed = self.process_lane_wp(left_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio)
+            left_wps_processed = self.process_lane_wp(left_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, -1, t)
         if len(right_wps) == 0:
             right_wps_processed = center_wps_processed.copy()
         else:
-            right_wps_processed = self.process_lane_wp(right_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio)
-        left = False
+            right_wps_processed = self.process_lane_wp(right_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 1, t)
+        left_wall = False
         if len(left_wps) == 0:
-            left = True
-        right = False
+            left_wall = True
+        right_wall = False
         if len(right_wps) == 0:
-            right = True
-        vehicle_inlane_processed = self.process_veh(dict['vehicle_inlane'], left, right)
+            right_wall = True
+        vehicle_inlane_processed = self.process_veh(dict['vehicle_inlane'], left_wall, right_wall)
         # if dict['vehicle_front']:
         #     vehicle_front = dict['vehicle_front']
         #     ego_speed = get_speed(self.ego_vehicle, False)
@@ -663,9 +674,6 @@ class CarlaEnv:
 
         # ego vehicle information
         # print('6')
-        lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
-        right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
-        t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
 
         yaw_diff_ego = math.degrees(get_yaw_diff(lane_center.transform.get_forward_vector(),
                                                self.ego_vehicle.get_transform().get_forward_vector()))
@@ -689,9 +697,9 @@ class CarlaEnv:
                 'right_waypoints': right_wps_processed, 'ego_vehicle': [v_s/10, v_t/10, a_s/3, a_t/3, t, yaw_diff_ego/90],
                 'vehicle_info': vehicle_inlane_processed}
 
-    def calculate_lane_change_reward(self, last_action, last_lane, current_lane, distance_to_front_vehicles):
-        print('distance_to_front_vehicles: ', distance_to_front_vehicles)
-        # still the distances of last time step
+    def calculate_lane_change_reward(self, last_action, last_lane, current_lane, distance_to_front_vehicles, distance_to_rear_vehicles):
+        print('distance_to_front_vehicles, distance_to_rear_vehicles: ', distance_to_front_vehicles, distance_to_rear_vehicles)
+        # still the distances of the last time step
         reward = 0
         center_front_dis = distance_to_front_vehicles[1]
         if current_lane - last_lane == -1:
@@ -702,6 +710,9 @@ class CarlaEnv:
                 reward = min((right_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
             else:
                 reward = max((right_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
+            print('reward1: ', reward)
+            reward = reward + self.calculate_rear_ttc_reward()
+            print('reward2: ', reward)
         elif current_lane - last_lane == 1:
             # change left
             self.calculate_impact = True
@@ -710,10 +721,13 @@ class CarlaEnv:
                 reward = min((left_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
             else:
                 reward = max((left_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
+            print('reward1: ', reward)
+            reward = reward + self.calculate_rear_ttc_reward()
+            print('reward2: ', reward)
 
         return reward
 
-    def _get_reward(self, last_action, last_lane, current_lane, distance_to_front_vehicles=[]):
+    def _get_reward(self, last_action, last_lane, current_lane, distance_to_front_vehicles, distance_to_rear_vehicles):
         """Calculate the step reward:
         TTC: Time to collide with front vehicle
         Eff: Ego vehicle efficiency, speed ralated
@@ -730,7 +744,7 @@ class CarlaEnv:
                 max(abs(self.vehicle_front.bounding_box.extent.x),abs(self.vehicle_front.bounding_box.extent.y))
             distance -= vehicle_len
             if distance < self.min_distance:
-                TTC = 0.000001
+                TTC = 0.01
             else:
                 distance -= self.min_distance
                 rel_speed = ego_speed / 3.6 - get_speed(self.vehicle_front, False)
@@ -766,15 +780,17 @@ class CarlaEnv:
         jerk = ((cur_acc.x - self.last_acc.x) * self.fps) ** 2 + ((cur_acc.y - self.last_acc.y) * self.fps) ** 2
         # whick still requires further testing, longitudinal and lateral
         fCom = -jerk / ((6 * self.fps) ** 2 + (12 * self.fps) ** 2)
-
-        Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
-        print(
-            f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
-        if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
-            fLcen = -1.5
-            print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
+        if self.guide_change:
+            Lcen, fLcen = self.calculate_guide_lane_center(lane_center, self.ego_vehicle.get_location(), distance_to_front_vehicles, distance_to_rear_vehicles)
         else:
-            fLcen = - Lcen / (lane_center.lane_width / 2)
+            Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
+            # print(
+            #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
+            if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
+                fLcen = -1.5
+                print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
+            else:
+                fLcen = - Lcen / (lane_center.lane_width / 2)
 
         yaw_diff = math.degrees(get_yaw_diff(lane_center.transform.get_forward_vector(),
                                 self.ego_vehicle.get_transform().get_forward_vector()))
@@ -792,7 +808,7 @@ class CarlaEnv:
             self.calculate_impact = False
 
         # reward for lane_changing
-        lane_changing_reward = self.calculate_lane_change_reward(last_action, last_lane, current_lane, distance_to_front_vehicles)
+        lane_changing_reward = self.calculate_lane_change_reward(last_action, last_lane, current_lane, distance_to_front_vehicles, distance_to_rear_vehicles)
 
         self.step_info = {'velocity': v_s, 'offlane': Lcen, 'yaw_diff': yaw_diff, 'TTC': fTTC, 'Comfort': fCom,
                           'Efficiency': fEff, 'Lane_center': fLcen, 'Yaw': fYaw,
@@ -806,11 +822,64 @@ class CarlaEnv:
                 else:
                     # If ego vehicle collides with traffic lights and stop signs, do not add penalty
                     self.step_info['Abandon'] = True
-                    return fTTC + fEff + fCom + fLcen + impact + lane_changing_reward
+                    return fTTC + fEff * 2 + fCom + fLcen + impact + lane_changing_reward
             else:
                 return - self.penalty
         else:
-            return fTTC + fEff + fCom + fLcen + impact + lane_changing_reward
+            return fTTC + fEff * 2 + fCom + fLcen + impact + lane_changing_reward
+
+    def calculate_guide_lane_center(self, lane_center, location, front_distance, rear_distance):
+        left = False
+        right = False
+        if lane_center.lane_id != -1 and front_distance[0] > 25 and front_distance[0]/front_distance[1] > 1.2 and rear_distance[0] > 25:
+            left = True
+        if lane_center.lane_id != -3 and front_distance[2] > 25 and front_distance[2]/front_distance[1] > 1.2 and rear_distance[2] > 25:
+            right = True
+        if left:
+            Lcen = lane_center.get_left_lane().transform.location.distance(location)
+            fLcen = - Lcen / lane_center.lane_width
+        elif right:
+            Lcen = lane_center.get_right_lane().transform.location.distance(location)
+            fLcen = - Lcen / lane_center.lane_width
+        else:
+            Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
+            # print(
+            #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
+            if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
+                fLcen = -1.5
+                print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
+            else:
+                fLcen = - Lcen / (lane_center.lane_width / 2)
+        return Lcen, fLcen
+
+    def calculate_guide_lane_center_pdqn(self, lane_center, location, front_distance, rear_distance):
+        pass
+
+    def calculate_rear_ttc_reward(self):
+        ego_speed = get_speed(self.ego_vehicle, True)
+        TTC = float('inf')
+        if self.vehicle_rear:
+            distance = self.ego_vehicle.get_location().distance(self.vehicle_rear.get_location())
+            vehicle_len = max(abs(self.ego_vehicle.bounding_box.extent.x),
+                              abs(self.ego_vehicle.bounding_box.extent.y)) + \
+                          max(abs(self.vehicle_rear.bounding_box.extent.x),
+                              abs(self.vehicle_rear.bounding_box.extent.y))
+            distance -= vehicle_len
+            if distance < self.min_distance:
+                TTC = 0.01
+            else:
+                distance -= self.min_distance
+                rel_speed = get_speed(self.vehicle_rear, False) - ego_speed / 3.6
+                if abs(rel_speed) > float(0.0000001):
+                    TTC = distance / rel_speed
+            # print(distance, TTC)
+        # fTTC=-math.exp(-TTC)
+        if TTC >= 0 and TTC <= self.TTC_THRESHOLD:
+            fTTC = np.clip(np.log(TTC / self.TTC_THRESHOLD), -1, 0)
+        else:
+            fTTC = 0
+
+        return fTTC
 
     def _speed_switch(self, cont):
         """cont: the control command of RL agent"""
@@ -834,7 +903,7 @@ class CarlaEnv:
                         print("2.current lane, target lane, new_target_lane, last action, new action: ",
                               self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
                               self.new_action)
-                        control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles = self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action)
+                        control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action)
                         print("2.current lane, target lane, new_target_lane, last action, new action: ",
                               self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
                               self.new_action)
@@ -866,7 +935,7 @@ class CarlaEnv:
                     # control=self.autopilot_controller.run_step()
                     print("3.current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                           self.target_lane, self.new_target_lane, self.last_action, self.new_action)
-                    control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles = self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action)
+                    control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action)
                     print("3.current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                           self.target_lane, self.new_target_lane, self.last_action, self.new_action)
                     self.target_lane = self.new_target_lane
