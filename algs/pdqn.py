@@ -233,7 +233,6 @@ class P_DQN:
         # self.tb_noise = OrnsteinUhlenbeckActionNoise(self.sigma, self.theta)
 
     def take_action(self, state):
-        # TODO: return action and action_param
         # print('vehicle_info', state['vehicle_info'])
         state_left_wps = torch.tensor(state['left_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
         state_center_wps = torch.tensor(state['center_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)

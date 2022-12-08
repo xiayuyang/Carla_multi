@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from algs.pdqn import P_DQN
 from gym_carla.env.settings import ARGS
-from gym_carla.env.carla_env import CarlaEnv
+from gym_carla.env.carla_env_pdqn import CarlaEnv_PDQN
 from process import start_process, kill_process
 from gym_carla.env.util.misc import fill_action_param
 
@@ -84,7 +84,7 @@ def main():
                         while not done and not truncated:
                             action, action_param, all_action_param = agent.take_action(state)
 
-                            next_state, reward, truncated, done, info = env.step(action_param)
+                            next_state, reward, truncated, done, info = env.step(action, action_param)
                             if env.is_effective_action() and not info['Abandon']:
                                 if 'Throttle' in info:
                                     # Input the guided action to replay buffer

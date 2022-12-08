@@ -242,7 +242,7 @@ class Basic_Lanechanging_Agent(object):
                 s = i + 1
         return s
 
-    def run_step(self, current_lane, target_lane, last_action):
+    def run_step(self, current_lane, target_lane, last_action, under_rl, action):
         self.autopilot_step = self.autopilot_step + 1
         """Execute one step of navigation."""
         hazard_detected = False
@@ -275,16 +275,19 @@ class Basic_Lanechanging_Agent(object):
             # just to avoid error, dont work
             self.lane_change = 0
 
-        if current_lane == target_lane:
-            new_action = self.lane_change
-            if not self._ignore_change_gap:
+        if not under_rl:
+            if current_lane == target_lane:
+                new_action = self.lane_change
                 if new_action == -1 and not self.enable_left_change:
                     new_action = 0
                 if new_action == 1 and not self.enable_right_change:
                     new_action = 0
-            new_target_lane = current_lane - new_action
+                new_target_lane = current_lane - new_action
+            else:
+                new_action = last_action
+                new_target_lane = target_lane
         else:
-            new_action = last_action
+            new_action = action - 1
             new_target_lane = target_lane
 
         control = self._local_planner.run_step({'distance_to_left_front': self.distance_to_left_front,
@@ -298,8 +301,6 @@ class Basic_Lanechanging_Agent(object):
                                                 'new_action': new_action})
         if hazard_detected:
             control = self.add_emergency_stop(control)
-        print('basic_lanechanging_agent: current lane, target_lane, new_target_lane, last_action, new_action: ',
-              current_lane, target_lane, new_target_lane, last_action, new_action)
         return control, new_target_lane, new_action, [self.distance_to_left_front, self.distance_to_center_front, self.distance_to_right_front], [self.distance_to_left_rear, self.distance_to_center_rear, self.distance_to_right_rear]
 
     def ignore_traffic_lights(self, active=True):
