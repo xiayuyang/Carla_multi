@@ -138,7 +138,7 @@ ARGS.add_argument(
     help='reward for lane change according to the distance to the preceding vehicle')
 ARGS.add_argument(
     '--speed_limit', type=float,
-    default=96.0,
+    default=72.0,
     help='Speed limit for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_threshold', type=float,
@@ -163,12 +163,12 @@ ARGS.add_argument(
     help='Brake bound for ego vehicle controller')
 ARGS.add_argument(
     '--switch_threshold', type=int,
-    default=2,
+    default=10,
     help='Let the TM controller control 1 episode after basic_agent controller control switch_threshold episodes'
 )
 ARGS.add_argument(
     '--pre_train_steps', type=int,
-    default=20000,
+    default=50000,
     help='Let the RL controller and PID controller alternatively take control every 500 steps'
 )
 ARGS.add_argument(

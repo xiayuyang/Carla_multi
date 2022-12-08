@@ -259,7 +259,7 @@ class CarlaEnv:
         # self.control_sigma={'Steer': random.choice([0,0]),
         #                     'Throttle_brake': random.choice([0,0])}
 
-        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, target_speed=30, opt_dict={'ignore_traffic_lights': True,
+        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, target_speed=self.speed_limit, opt_dict={'ignore_traffic_lights': True,
         'ignore_stop_signs': True, 'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
         'sampling_radius': self.sampling_resolution, 'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,
         'max_brake': self.brake_bound, 'buffer_size': self.buffer_size, 'ignore_front_vehicle': random.choice([True, False]),
@@ -376,7 +376,7 @@ class CarlaEnv:
         # Only use RL controller after ego vehicle speed reach speed_threshold
         # Use DFA to calculate different speed state transition
         if not self.debug:
-            control = self._speed_switch(control)
+            control = self._speed_switch(control, a_index)
         else:
             # if self.autopilot_controller.done() and self.loop:
             #     # self.autopilot_controller.set_destination(random.choice(self.spawn_points).location)
@@ -796,7 +796,7 @@ class CarlaEnv:
             # print(
             #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
             if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
-                fLcen = -1.5
+                fLcen = -2
                 print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
             else:
                 fLcen = - Lcen / (lane_center.lane_width / 2)
@@ -832,11 +832,11 @@ class CarlaEnv:
                 else:
                     # If ego vehicle collides with traffic lights and stop signs, do not add penalty
                     self.step_info['Abandon'] = True
-                    return fTTC + fEff * 2 + fCom + fLcen + impact + lane_changing_reward
+                    return fTTC + fEff + fCom + fLcen + impact + lane_changing_reward
             else:
                 return - self.penalty
         else:
-            return fTTC + fEff * 2 + fCom + fLcen + impact + lane_changing_reward
+            return fTTC + fEff + fCom + fLcen + impact + lane_changing_reward
 
     def get_acc_s(self, acc, yaw_forward):
         acc.z = 0
@@ -908,7 +908,7 @@ class CarlaEnv:
 
         return fTTC
 
-    def _speed_switch(self, cont):
+    def _speed_switch(self, cont, a_index):
         """cont: the control command of RL agent"""
         ego_speed = get_speed(self.ego_vehicle)
         control = cont
@@ -940,7 +940,7 @@ class CarlaEnv:
                 else:
                     self._ego_autopilot(False)
             else:
-                print("21.current lane, target lane, new_target_lane, last action, new action: ",
+                print("initial: current lane, target lane, new_target_lane, last action, new action: ",
                       self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
                       self.new_action)
         elif self.speed_state == SpeedState.RUNNING:
@@ -948,8 +948,8 @@ class CarlaEnv:
                 # under rl control
                 print("rl_control: current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                       self.target_lane, self.new_target_lane, self.last_action, self.new_action)
-                control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
-                    self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1)
+                fake_control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
+                    self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, True, a_index)
                 print("rl_control: current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                       self.target_lane, self.new_target_lane, self.last_action, self.new_action)
                 if ego_speed < self.speed_min:
@@ -1001,7 +1001,7 @@ class CarlaEnv:
         # if self.lane_invasion_sensor.get_invasion_count()!=0:
         #     logging.warn('lane invasion occur')
         #     return True
-        if self.step_info['Lane_center'] < -1.4:
+        if self.step_info['Lane_center'] < -1.8:
             logging.warn('lane invasion occur')
             return True
 
@@ -1040,7 +1040,7 @@ class CarlaEnv:
         # Use traffic manager to control ego vehicle
         self.ego_vehicle.set_autopilot(setting, self.tm_port)
         if setting:
-            speed_diff = (30 * 3.6 - self.speed_limit) / (30 * 3.6) * 100
+            speed_diff = (30 - self.speed_limit) / 30 * 100
             self.traffic_manager.distance_to_leading_vehicle(self.ego_vehicle, self.min_distance)
             self.traffic_manager.ignore_lights_percentage(self.ego_vehicle, 100)
             self.traffic_manager.ignore_signs_percentage(self.ego_vehicle, 100)
@@ -1133,7 +1133,7 @@ class CarlaEnv:
         Vehicles' target speed is 70% of their current speed limit unless any other value is set."""
         speed_diff = (30 * 3.6 - (self.speed_limit+1)) / (30 * 3.6) * 100
         # Let the companion vehicles drive a bit faster than ego speed limit
-        self.traffic_manager.global_percentage_speed_difference(0)
+        self.traffic_manager.global_percentage_speed_difference(-100)
         self.traffic_manager.set_synchronous_mode(self.sync)
 
     def _try_spawn_ego_vehicle_at(self, transform):
