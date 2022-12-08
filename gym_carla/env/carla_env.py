@@ -855,27 +855,35 @@ class CarlaEnv:
         return acc_jerk * 0.5 + Yaw_jerk, yaw_diff
 
     def calculate_guide_lane_center(self, lane_center, location, front_distance, rear_distance):
-        left = False
-        right = False
-        if lane_center.lane_id != -1 and front_distance[0] > 25 and front_distance[0]/front_distance[1] > 1.2 and rear_distance[0] > 25:
-            left = True
-        if lane_center.lane_id != -3 and front_distance[2] > 25 and front_distance[2]/front_distance[1] > 1.2 and rear_distance[2] > 25:
-            right = True
-        if left:
-            Lcen = lane_center.get_left_lane().transform.location.distance(location)
-            fLcen = - Lcen / lane_center.lane_width
-        elif right:
-            Lcen = lane_center.get_right_lane().transform.location.distance(location)
-            fLcen = - Lcen / lane_center.lane_width
+        Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
+        # print(
+        #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
+        if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
+            fLcen = -2
+            print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen,
+                  lane_center.lane_width / 2)
         else:
-            Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
-            # print(
-            #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
-            if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
-                fLcen = -1.5
-                print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
+            left = False
+            right = False
+            if lane_center.lane_id != -1 and front_distance[0] > 25 and front_distance[0]/front_distance[1] > 1.2 and rear_distance[0] > 25:
+                left = True
+            if lane_center.lane_id != -3 and front_distance[2] > 25 and front_distance[2]/front_distance[1] > 1.2 and rear_distance[2] > 25:
+                right = True
+            if left:
+                Lcen = lane_center.get_left_lane().transform.location.distance(location)
+                fLcen = - Lcen / lane_center.lane_width
+            elif right:
+                Lcen = lane_center.get_right_lane().transform.location.distance(location)
+                fLcen = - Lcen / lane_center.lane_width
             else:
-                fLcen = - Lcen / (lane_center.lane_width / 2)
+                Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
+                # print(
+                #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
+                if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
+                    fLcen = -1.5
+                    print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
+                else:
+                    fLcen = - Lcen / (lane_center.lane_width / 2)
         return Lcen, fLcen
 
     def calculate_guide_lane_center_pdqn(self, lane_center, location, front_distance, rear_distance, action):
