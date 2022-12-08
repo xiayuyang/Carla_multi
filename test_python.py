@@ -53,6 +53,9 @@ import torch
 
 # a=[None for i in range(4)]
 # print(a)
-
-a=abs(0.01)
+a=0.5
+for i in range(20000):
+    a=a*0.9999
 print(a)
+# a=abs(0.01)
+# print(a)

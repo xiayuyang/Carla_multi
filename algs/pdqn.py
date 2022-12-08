@@ -18,21 +18,21 @@ class ReplayBuffer:
         # with open('./out/replay_buffer_test.txt', 'w') as f:
         #     pass
     # TODO
-    def add(self, state, action, reward, next_state, truncated, done, info):
+    def add(self, state, action, action_param, reward, next_state, truncated, done, info):
         # first compress state info, then add
         state = self._compress(state)
         next_state = self._compress(next_state)
         lane_center = info["offlane"]
         reward_ttc = info["TTC"]
         if reward_ttc < -0.1:
-            self.change_buffer.append((state, action, reward, next_state, truncated, done))
+            self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         if lane_center > 1.0:
-            self.change_buffer.append((state, action, reward, next_state, truncated, done))
-        self.tem_buffer.append((state, action, reward, next_state, truncated, done))
+            self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
+        self.tem_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         if abs(info['lane_changing_reward']) > 0.1:
             for buf in self.tmp_buffer:
                 self.change_buffer.append(buf)
-        self.buffer.append((state, action, reward, next_state, truncated, done))
+        self.buffer.append((state, action, action_param, reward, next_state, truncated, done))
         reward_com = info["Comfort"]
         reward_eff = info["velocity"]
 
@@ -46,16 +46,17 @@ class ReplayBuffer:
         pri_size = min(batch_size // 4, len(self.change_buffer))
         normal_size = batch_size - pri_size
         transition = random.sample(self.buffer, normal_size)
-        state, action, reward, next_state, truncated, done = zip(*transition)
+        state, action, action_param, reward, next_state, truncated, done = zip(*transition)
         pri_transition = random.sample(self.change_buffer, pri_size)
-        pri_state, pri_action, pri_reward, pri_next_state, pri_truncated, pri_done = zip(*pri_transition)
+        pri_state, pri_action, pri_action_param, pri_reward, pri_next_state, pri_truncated, pri_done = zip(*pri_transition)
         state = np.concatenate((state, pri_state), axis=0)
         action = np.concatenate((action, pri_action), axis=0)
+        action_param = np.concatenate((action_param, pri_action_param), axis=0)
         reward = np.concatenate((reward, pri_reward), axis=0)
         next_state = np.concatenate((next_state, pri_next_state), axis=0)
         truncated = np.concatenate((truncated, pri_truncated), axis=0)
         done = np.concatenate((done, pri_done), axis=0)
-        return state, action, reward, next_state, truncated, done
+        return state, action, action_param, reward, next_state, truncated, done
 
     def size(self):
         return len(self.buffer)
@@ -187,7 +188,7 @@ class P_DQN:
         self.replace_a = 0
         self.replace_c = 0
         self.s_dim = state_dim  # state_dim here is a dict
-        self.s_dim['waypoints'] *= 2  # 2 is the feature dim of each waypoint
+        self.s_dim['waypoints'] *= 3  # 2 is the feature dim of each waypoint
         self.a_dim, self.a_bound = action_dim, action_bound
         self.theta = theta
         self.num_actions = 3  # left change, lane follow, right change

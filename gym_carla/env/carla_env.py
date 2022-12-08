@@ -263,7 +263,7 @@ class CarlaEnv:
         'ignore_stop_signs': True, 'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
         'sampling_radius': self.sampling_resolution, 'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,
         'max_brake': self.brake_bound, 'buffer_size': self.buffer_size, 'ignore_front_vehicle': random.choice([True, False]),
-        'ignore_change_gap': random.choice([True, False, False]), 'lanechanging_fps': random.choice([40, 50, 60])})
+        'ignore_change_gap': random.choice([True, False]), 'lanechanging_fps': random.choice([40, 50, 60])})
 
 
         # code for synchronous mode
