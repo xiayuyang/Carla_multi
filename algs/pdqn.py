@@ -14,9 +14,7 @@ class ReplayBuffer:
         self.change_buffer = collections.deque(maxlen=capacity//10)
         self.tmp_buffer = collections.deque(maxlen=10)
         self.number = 0
-        # self.all_buffer = np.zeros((1000000, 66), dtype=np.float32)
-        # with open('./out/replay_buffer_test.txt', 'w') as f:
-        #     pass
+
     def add(self, state, action, action_param, reward, next_state, truncated, done, info):
         # first compress state info, then add
         state = self._compress(state)
@@ -39,7 +37,6 @@ class ReplayBuffer:
         # print("their shapes", state, action, next_state, reward_list, truncated, done)
         # state: [1, 28], action: [1, 2], next_state: [1, 28], reward_list = [1, 6], truncated = [1, 1], done = [1, 1]
         # all: [1, 66]
-
 
     def sample(self, batch_size):  # 从buffer中采样数据,数量为batch_size
         pri_size = min(batch_size // 4, len(self.change_buffer))
@@ -202,7 +199,7 @@ class P_DQN:
         self.buffer_size, self.batch_size, self.device = buffer_size, batch_size, device
         self.actor_lr, self.critic_lr = actor_lr, critic_lr
         self.clip_grad = clip_grad
-        self.indexd = False
+        self.indexd = zero_index_gradients
         self.zero_index_gradients = zero_index_gradients
         self.inverting_gradients = inverting_gradients
         # adjust different types of replay buffer
@@ -257,8 +254,14 @@ class P_DQN:
         print(f'Network Output - Steer: {action_param[0][0]}, Throttle_brake: {action_param[0][1]}')
         if (action_param[0, 0].is_cuda):
             action_param = np.array([action_param[:, 0].detach().cpu().numpy(), action_param[:, 1].detach().cpu().numpy()]).reshape((-1, 2))
+            all_action_param = np.array([all_action_param[:, 0].detach().cpu().numpy(), all_action_param[:, 1].detach().cpu().numpy(),
+                                        all_action_param[:, 2].detach().cpu().numpy(), all_action_param[:, 3].detach().cpu().numpy(),
+                                        all_action_param[:, 4].detach().cpu().numpy(), all_action_param[:, 5].detach().cpu().numpy()]).reshape((-1, 6))
         else:
             action_param = np.array([action_param[:, 0].detach().numpy(), action_param[:, 1].detach().numpy()]).reshape((-1, 2))
+            all_action_param = np.array([all_action_param[:, 0].detach().numpy(), all_action_param[:, 1].detach().numpy(),
+                                        all_action_param[:, 2].detach().numpy(), all_action_param[:, 3].detach().numpy(),
+                                        all_action_param[:, 4].detach().numpy(), all_action_param[:, 5].detach().numpy()]).reshape((-1, 6))
         # if np.random.random()<self.epsilon:
         if self.train:
             action_param[:, 0] = np.clip(np.random.normal(action_param[:, 0], self.sigma), -1, 1)
@@ -356,7 +359,7 @@ class P_DQN:
         Q = self.critic(batch_s, action_param)
         Q_val = Q
         if self.indexd:
-            Q_indexed = Q_val.gather(1, batch_a.unsqueeze(1))
+            Q_indexed = Q_val.gather(1, batch_a)
             Q_loss = torch.mean(Q_indexed)
         else:
             Q_loss = torch.mean(torch.sum(Q_val, 1))
