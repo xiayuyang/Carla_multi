@@ -91,12 +91,13 @@ def main():
                                     # Input the guided action to replay buffer
                                     throttle_brake = -info['Brake'] if info['Brake'] > 0 else info['Throttle']
                                     action = info['Change']
-                                    action_param = np.array([[info['Steer'], throttle_brake]])
-                                    saved_action_param = fill_action_param(action, info['Steer'], throttle_brake, SIGMA)
+                                    # action_param = np.array([[info['Steer'], throttle_brake]])
+                                    saved_action_param = fill_action_param(action, info['Steer'], throttle_brake, all_action_param)
                                     agent.replay_buffer.add(state, action, saved_action_param, reward, next_state, truncated, done, info)
-                                else:
-                                    # Input the agent action to replay buffer
-                                    agent.replay_buffer.add(state, action, all_action_param, reward, next_state, truncated, done, info)
+                                # else:
+                                #     # not work
+                                #     # Input the agent action to replay buffer
+                                #     agent.replay_buffer.add(state, action, all_action_param, reward, next_state, truncated, done, info)
                                 # print(f"state -- vehicle_info:{state['vehicle_info']}\n"
                                 #       f"waypoints:{state['left_waypoints']}, \n"
                                 #       f"waypoints:{state['center_waypoints']}, \n"

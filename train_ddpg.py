@@ -91,6 +91,7 @@ def main():
                                     action = np.array([[info['Steer'], throttle_brake]])
                                     agent.replay_buffer.add(state, action, reward, next_state, truncated, done, info)
                                 else:
+                                    # not work
                                     # Input the agent action to replay buffer
                                     agent.replay_buffer.add(state, action, reward, next_state, truncated, done, info)
                                 print(f"state -- vehicle_info:{state['vehicle_info']}\n"

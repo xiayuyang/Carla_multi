@@ -4,6 +4,21 @@ import math
 import numpy as np
 import carla
 from gym_carla.env.settings import *
+from enum import Enum
+
+
+class RoadOption(Enum):
+    """
+    RoadOption represents the possible topological configurations when moving from a segment of lane to other.
+
+    """
+    VOID = -1
+    LEFT = 1
+    RIGHT = 2
+    STRAIGHT = 3
+    LANEFOLLOW = 4
+    CHANGELANELEFT = 5
+    CHANGELANERIGHT = 6
 
 def remove_unnecessary_objects(world):
     """Remove unuseful objects in the world"""
@@ -65,26 +80,10 @@ def draw_waypoints(world, waypoints, life_time=0.0, z=0.5):
         end = begin + carla.Location(x=math.cos(angle), y=math.sin(angle))
         world.debug.draw_arrow(begin, end, arrow_size=0.3, life_time=life_time)
 
-def fill_action_param(action, steer, throttle_brake, sigma):
-    action_param = []
-    for i in range(6):
-        action_param.append(np.clip(np.random.normal(0, sigma), -1, 1))
-    action_param[action*2] = steer
-    action_param[action*2+1] = throttle_brake
+def fill_action_param(action, steer, throttle_brake, action_param):
+    action_param[0][action*2] = steer
+    action_param[0][action*2+1] = throttle_brake
     return action_param
-from enum import Enum
-class RoadOption(Enum):
-    """
-    RoadOption represents the possible topological configurations when moving from a segment of lane to other.
-
-    """
-    VOID = -1
-    LEFT = 1
-    RIGHT = 2
-    STRAIGHT = 3
-    LANEFOLLOW = 4
-    CHANGELANELEFT = 5
-    CHANGELANERIGHT = 6
 
 def _retrieve_options(list_waypoints, current_waypoint):
     """
