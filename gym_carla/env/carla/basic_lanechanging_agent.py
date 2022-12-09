@@ -296,18 +296,20 @@ class Basic_Lanechanging_Agent(object):
         else:
             new_action = action - 1
             new_target_lane = target_lane
-
-        control = self._local_planner.run_step({'distance_to_left_front': self.distance_to_left_front,
-                                                'distance_to_center_front': self.distance_to_center_front,
-                                                'distance_to_right_front': self.distance_to_right_front,
-                                                'distance_to_left_rear': self.distance_to_left_rear,
-                                                'distance_to_right_rear': self.distance_to_right_rear,
-                                                'left_wps': self.left_wps,
-                                                'center_wps': self.center_wps,
-                                                'right_wps': self.right_wps,
-                                                'new_action': new_action})
-        if hazard_detected:
-            control = self.add_emergency_stop(control)
+        if under_rl:
+            control = None
+        else:
+            control = self._local_planner.run_step({'distance_to_left_front': self.distance_to_left_front,
+                                                    'distance_to_center_front': self.distance_to_center_front,
+                                                    'distance_to_right_front': self.distance_to_right_front,
+                                                    'distance_to_left_rear': self.distance_to_left_rear,
+                                                    'distance_to_right_rear': self.distance_to_right_rear,
+                                                    'left_wps': self.left_wps,
+                                                    'center_wps': self.center_wps,
+                                                    'right_wps': self.right_wps,
+                                                    'new_action': new_action})
+            if hazard_detected:
+                control = self.add_emergency_stop(control)
         return control, new_target_lane, new_action, [self.distance_to_left_front, self.distance_to_center_front, self.distance_to_right_front], [self.distance_to_left_rear, self.distance_to_center_rear, self.distance_to_right_rear]
 
     def ignore_traffic_lights(self, active=True):

@@ -72,6 +72,128 @@ def fill_action_param(action, steer, throttle_brake, sigma):
     action_param[action*2] = steer
     action_param[action*2+1] = throttle_brake
     return action_param
+from enum import Enum
+class RoadOption(Enum):
+    """
+    RoadOption represents the possible topological configurations when moving from a segment of lane to other.
+
+    """
+    VOID = -1
+    LEFT = 1
+    RIGHT = 2
+    STRAIGHT = 3
+    LANEFOLLOW = 4
+    CHANGELANELEFT = 5
+    CHANGELANERIGHT = 6
+
+def _retrieve_options(list_waypoints, current_waypoint):
+    """
+    Compute the type of connection between the current active waypoint and the multiple waypoints present in
+    list_waypoints. The result is encoded as a list of RoadOption enums.
+
+    :param list_waypoints: list with the possible target waypoints in case of multiple options
+    :param current_waypoint: current active waypoint
+    :return: list of RoadOption enums representing the type of connection from the active waypoint to each
+        candidate in list_waypoints
+    """
+    options = []
+    for next_waypoint in list_waypoints:
+        # this is needed because something we are linking to
+        # the beggining of an intersection, therefore the
+        # variation in angle is small
+        next_next_waypoint = next_waypoint.next(3.0)[0]
+        link = _compute_connection(current_waypoint, next_next_waypoint)
+        options.append(link)
+
+    return options
+
+def _compute_connection(current_waypoint, next_waypoint):
+    """
+    Compute the type of topological connection between an active waypoint (current_waypoint) and a target waypoint
+    (next_waypoint).
+
+    :param current_waypoint: active waypoint
+    :param next_waypoint: target waypoint
+    :return: the type of topological connection encoded as a RoadOption enum:
+        RoadOption.STRAIGHT
+        RoadOption.LEFT
+        RoadOption.RIGHT
+    """
+    n = next_waypoint.transform.rotation.yaw
+    n = n % 360.0
+
+    c = current_waypoint.transform.rotation.yaw
+    c = c % 360.0
+
+    diff_angle = (n - c) % 180.0
+    if diff_angle < 1.0:
+        return RoadOption.STRAIGHT
+    elif diff_angle > 90.0:
+        return RoadOption.LEFT
+    else:
+        return RoadOption.RIGHT
+
+def _compute_next_waypoints(k, last_waypoint, direction, sampling_resolution, shoulder_lane_id):
+    # ensure waypoint is in the shoulder
+    for _ in range(k):
+        if direction:
+            next_waypoints = list(last_waypoint.next(sampling_resolution))
+        else:
+            next_waypoints = list(last_waypoint.previous(sampling_resolution))
+
+        if len(next_waypoints) == 0:
+            break
+        elif len(next_waypoints) == 1:
+            # only one option available ==> lanefollowing
+            next_waypoint = next_waypoints[0]
+            road_option = RoadOption.LANEFOLLOW
+        else:
+            road_options_list = self._retrieve_options(
+                next_waypoints, last_waypoint)
+
+            # # random choice between the possible options
+            # road_option = road_options_list[1]
+            # #road_option = random.choice(road_options_list)
+            # next_waypoint = next_waypoints[road_options_list.index(road_option)]
+
+            idx = None
+            for i, wp in enumerate(next_waypoints):
+                if wp.lane_id == shoulder_lane_id:
+                    next_waypoint = wp
+                    idx = i
+    return next_waypoint
+
+def get_lane_center_pre(map, location):
+    lane_center = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Driving)
+    road_id = lane_center.road_id
+    lane_id = lane_center.lane_id
+    print('before process road_id and lane_id: ', road_id, lane_id)
+    in_road = road_id in ROADS
+    sample_re = 10
+    if road_id in FORWARD_ROADS:
+        lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Shoulder)
+        print('lane_should: ', lane_shoulder.road_id, lane_shoulder.lane_id)
+        lane_shoulder_center = _compute_next_waypoints(1, lane_shoulder, True, sample_re, lane_shoulder.lane_id)
+        lane_minus_1 = lane_shoulder_center.get_right_lane()
+        if lane_minus_1 is not None:
+            print('RIGHT, lane_minus_1: ', lane_minus_1.lane_id, lane_minus_1.road_id)
+        lane_minus_1 = lane_shoulder_center.get_left_lane()
+        if lane_minus_1 is not None:
+            print('LEFT, lane_minus_1: ', lane_minus_1.lane_id, lane_minus_1.road_id)
+        lane_center = _compute_next_waypoints(1, lane_minus_1, False, sample_re, lane_minus_1.lane_id)
+    elif road_id in BACKWARD_ROADS:
+        lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Shoulder)
+        lane_shoulder_center = _compute_next_waypoints(1, lane_shoulder, False, sample_re, lane_shoulder.lane_id)
+        lane_minus_1 = lane_shoulder_center.get_right_lane()
+        if lane_minus_1 is not None:
+            print('RIGHT, lane_minus_1: ', lane_minus_1.lane_id, lane_minus_1.road_id)
+        lane_minus_1 = lane_shoulder_center.get_left_lane()
+        if lane_minus_1 is not None:
+            print('LEFT, lane_minus_1: ', lane_minus_1.lane_id, lane_minus_1.road_id)
+        lane_center = _compute_next_waypoints(1, lane_minus_1, True, sample_re, lane_minus_1.lane_id)
+
+    print(lane_center.road_id, lane_center.lane_id)
+    return lane_center
 
 def get_lane_center(map, location):
     """Project current loction to its lane center, return lane center waypoint"""
@@ -110,7 +232,7 @@ def get_lane_center(map, location):
         # if lane_center.lane_id != -1:
         #     lane_center = lane_center.get_right_lane()
         lane_shoulder = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Shoulder)
-        print('lane_shoulder, lane_shoulder.lane_id, road_id, lane_id: ', lane_shoulder, lane_shoulder.lane_id, road_id, lane_id)
+        # print('lane_shoulder, lane_shoulder.lane_id, road_id, lane_id: ', lane_shoulder, lane_shoulder.lane_id, road_id, lane_id)
         if lane_shoulder.lane_id == 1:
             lane_center_right = lane_shoulder.get_right_lane()
             lane_center_left = lane_shoulder.get_left_lane()
@@ -141,7 +263,7 @@ def get_lane_center(map, location):
         elif lane_shoulder.lane_id == -6:
             # print('lane_shoulder.lane_id == -6')
             lane_center = lane_shoulder.get_left_lane().get_left_lane().get_left_lane().get_left_lane().get_left_lane()
-
+    # print('lane_center.road_id: ', lane_center.road_id)
     return lane_center
 
 # def get_yaw_diff(rotation1, rotation2):
@@ -162,16 +284,16 @@ def get_yaw_diff(vector1,vector2):
     negative value means vector1 is on the left of vector2, positive is on the right of vector2.
     The vector format should be carla.Vector3D, and we set the vectors' z value to 0 because of the map been working on.
     """
-    vector1.z=0
-    vector2.z=0
+    vector1.z = 0
+    vector2.z = 0
     # vector1=vector1.make_unit_vector()
     # vector2=vector2.make_unit_vector()
-    theta_sign=1 if vector1.cross(vector2).z>=0 else -1
-    if vector1.length()!=0.0 and vector2.length()!=0.0:
-        theta=math.acos(
-            np.clip(vector1.dot(vector2)/(vector1.length()*vector2.length()),-1,1))
+    theta_sign=1 if vector1.cross(vector2).z >= 0 else -1
+    if vector1.length() != 0.0 and vector2.length() != 0.0:
+        theta = math.acos(
+            np.clip(vector1.dot(vector2)/(vector1.length()*vector2.length()), -1, 1))
     else:
-        theta=0
+        theta = 0
     return theta_sign*theta
 
 def get_speed(vehicle, unit=True):

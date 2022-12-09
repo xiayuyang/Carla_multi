@@ -5,17 +5,22 @@ CARLA_PATH = 'D:\WindowsNoEditor'
 # the following road id sets define the chosen route
 ROADS = set()
 DISTURB_ROADS = set()
+FORWARD_ROADS = set()
+BACKWARD_ROADS = set()
 STRAIGHT = {12, 35, 36}
 CURVE = {37, 38, 34}
 JUNCTION = {2344, 2035}
 DOUBLE_DIRECTION = {2358, 2363, 2039, 2052}
+FORWARD_DOUBLE_DIRECTION = {2358, 2039}
+BACKWARD_DOUBLE_DIRECTION = {2363, 2052}
 # JUNCTION_LANE={33,85,141}
 # JUNCTION_LANE_MINUS={102,109,150,163,46,67,128}
 ROADS.update(STRAIGHT)
 ROADS.update(CURVE)
 ROADS.update(JUNCTION)
 DISTURB_ROADS.update(DOUBLE_DIRECTION)
-
+FORWARD_ROADS.update(FORWARD_DOUBLE_DIRECTION)
+BACKWARD_ROADS.update(BACKWARD_DOUBLE_DIRECTION)
 # the flowing arguments set the simulation parameters
 ARGS = argparse.ArgumentParser(
     description='CARLA_gym Client')
@@ -168,7 +173,7 @@ ARGS.add_argument(
 )
 ARGS.add_argument(
     '--pre_train_steps', type=int,
-    default=50000,
+    default=40000,
     help='Let the RL controller and PID controller alternatively take control every 500 steps'
 )
 ARGS.add_argument(

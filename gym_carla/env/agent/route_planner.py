@@ -443,7 +443,6 @@ class LocalPlanner:
                 else:
                     # road_options_list = self._retrieve_options(
                     #     next_waypoints, last_waypoint)
-
                     idx = None
                     for i, wp in enumerate(previous_waypoints):
                         if wp.road_id in ROADS:
