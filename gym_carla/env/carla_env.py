@@ -33,7 +33,7 @@ class SpeedState(Enum):
 
 
 class CarlaEnv:
-    def __init__(self, args) -> None:
+    def __init__(self, args, train_pdqn=False) -> None:
         super().__init__()
         self.host = args.host
         self.port = args.port
@@ -66,6 +66,7 @@ class CarlaEnv:
         self.steer_bound = args.steer_bound
         self.throttle_bound = args.throttle_bound
         self.brake_bound = args.brake_bound
+        self.train_pdqn = train_pdqn
 
         logging.info('listening to server %s:%s', args.host, args.port)
         self.client = carla.Client(self.host, self.port)
@@ -254,12 +255,12 @@ class CarlaEnv:
                                                         'max_brake': self.brake_bound})
         # self.control_sigma={'Steer':random.choice([0.3, 0.4, 0.5]),
         #                 'Throttle_brake':random.choice([0.4,0.5,0.6])}
-        self.control_sigma={'Steer': random.choice([0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]),
+        self.control_sigma={'Steer': random.choice([0, 0.05, 0.1, 0.15, 0.2]),
                             'Throttle_brake': random.choice([0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4])}
         # self.control_sigma={'Steer': random.choice([0,0]),
         #                     'Throttle_brake': random.choice([0,0])}
 
-        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, target_speed=self.speed_limit, opt_dict={'ignore_traffic_lights': True,
+        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, target_speed=50, opt_dict={'ignore_traffic_lights': True,
         'ignore_stop_signs': True, 'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
         'sampling_radius': self.sampling_resolution, 'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,
         'max_brake': self.brake_bound, 'buffer_size': self.buffer_size, 'ignore_front_vehicle': random.choice([True, False]),
@@ -743,6 +744,8 @@ class CarlaEnv:
         ego_speed = get_speed(self.ego_vehicle, True)
         # print('7')
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
+        right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
+        t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
         TTC = float('inf')
         if self.vehicle_front:
             distance = self.ego_vehicle.get_location().distance(self.vehicle_front.get_location())
@@ -788,18 +791,20 @@ class CarlaEnv:
         # jerk = ((cur_acc.x - self.last_acc.x) * self.fps) ** 2 + ((cur_acc.y - self.last_acc.y) * self.fps) ** 2
         # # whick still requires further testing, longitudinal and lateral
         # fCom = -jerk / ((6 * self.fps) ** 2 + (12 * self.fps) ** 2)
-
-        if self.guide_change:
-            Lcen, fLcen = self.calculate_guide_lane_center(lane_center, self.ego_vehicle.get_location(), distance_to_front_vehicles, distance_to_rear_vehicles)
+        if self.train_pdqn:
+            Lcen, fLcen = self.pdqn_lane_center(lane_center, self.ego_vehicle.get_location(), self.new_action, t)
         else:
-            Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
-            # print(
-            #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
-            if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
-                fLcen = -2
-                print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
+            if self.guide_change:
+                Lcen, fLcen = self.calculate_guide_lane_center(lane_center, self.ego_vehicle.get_location(), distance_to_front_vehicles, distance_to_rear_vehicles)
             else:
-                fLcen = - Lcen / (lane_center.lane_width / 2)
+                Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
+                # print(
+                #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
+                if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
+                    fLcen = -2
+                    print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
+                else:
+                    fLcen = - Lcen / (lane_center.lane_width / 2)
 
         yaw_diff = math.degrees(get_yaw_diff(lane_center.transform.get_forward_vector(),
                                 self.ego_vehicle.get_transform().get_forward_vector()))
@@ -848,6 +853,25 @@ class CarlaEnv:
         acc_s = acc.length() * math.cos(theta_acc)
         return acc_s
 
+    def pdqn_lane_center(self, lane_center, ego_location, action, t):
+        Lcen = lane_center.transform.location.distance(ego_location)
+        lane_wid = lane_center.lane_width
+        if not test_waypoint(lane_center, True) or Lcen > lane_wid / 2 + 0.1:
+            fLcen = -1.5
+            print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen,
+                  lane_wid / 2)
+        else:
+            if action == -1:
+                # change left
+                Lcen = lane_wid + t
+                fLcen = -Lcen / lane_wid
+            elif action == 0:
+                fLcen = -Lcen / (lane_wid / 2)
+            elif action == 1:
+                Lcen = lane_wid - t
+                fLcen = -Lcen / lane_wid
+        return Lcen, fLcen
+
     def compute_comfort(self, last_acc, acc, last_yaw, yaw):
         acc_jerk = -((acc - last_acc) * self.fps) ** 2 / ((6 * self.fps) ** 2)
         yaw_diff = math.degrees(get_yaw_diff(last_yaw, yaw))
@@ -886,9 +910,6 @@ class CarlaEnv:
                     fLcen = - Lcen / (lane_center.lane_width / 2)
         return Lcen, fLcen
 
-    def calculate_guide_lane_center_pdqn(self, lane_center, location, front_distance, rear_distance, action):
-
-        pass
 
     def calculate_rear_ttc_reward(self):
         ego_speed = get_speed(self.ego_vehicle, True)

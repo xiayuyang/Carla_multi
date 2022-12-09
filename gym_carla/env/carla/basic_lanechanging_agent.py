@@ -210,9 +210,9 @@ class Basic_Lanechanging_Agent(object):
         else:
             self.enable_left_change = False
             self.enable_right_change = False
-            if self.distance_to_left_front / self.distance_to_center_front > 1.1:
+            if self.distance_to_left_front / self.distance_to_center_front > 1.1 and self.distance_to_left_rear > 20:
                 self.enable_left_change = True
-            if self.distance_to_right_front / self.distance_to_center_front > 1.1:
+            if self.distance_to_right_front / self.distance_to_center_front > 1.1 and self.distance_to_right_rear > 20:
                 self.enable_right_change = True
         print("distance enable: ", self.distance_to_left_front, self.distance_to_center_front,
               self.distance_to_right_front, self.distance_to_left_rear, self.distance_to_center_rear,

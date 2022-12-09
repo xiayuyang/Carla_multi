@@ -122,7 +122,7 @@ def main():
                                 agent.save_net('./out/ddpg_pre_trained.pth')
 
                             if env.rl_control_step > 10000 and env.is_effective_action() and \
-                                    env.RL_switch and SIGMA > 0.05:
+                                    env.RL_switch and SIGMA > 0.01:
                                 globals()['SIGMA'] *= SIGMA_DECAY
                                 agent.set_sigma(SIGMA)
 

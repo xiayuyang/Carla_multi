@@ -17,7 +17,6 @@ class ReplayBuffer:
         # self.all_buffer = np.zeros((1000000, 66), dtype=np.float32)
         # with open('./out/replay_buffer_test.txt', 'w') as f:
         #     pass
-    # TODO
     def add(self, state, action, action_param, reward, next_state, truncated, done, info):
         # first compress state info, then add
         state = self._compress(state)
@@ -28,7 +27,7 @@ class ReplayBuffer:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         if lane_center > 1.0:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
-        self.tem_buffer.append((state, action, action_param, reward, next_state, truncated, done))
+        self.tmp_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         if abs(info['lane_changing_reward']) > 0.1:
             for buf in self.tmp_buffer:
                 self.change_buffer.append(buf)
