@@ -23,10 +23,10 @@ class ReplayBuffer:
         reward_ttc = info["TTC"]
         if reward_ttc < -0.1:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
-        if lane_center > 1.0:
+        if action == 0 or action == 2:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         self.tmp_buffer.append((state, action, action_param, reward, next_state, truncated, done))
-        if abs(info['lane_changing_reward']) > 0.1:
+        if info['lane_changing_reward'] > 0.1:
             for buf in self.tmp_buffer:
                 self.change_buffer.append(buf)
         self.buffer.append((state, action, action_param, reward, next_state, truncated, done))
@@ -39,7 +39,7 @@ class ReplayBuffer:
         # all: [1, 66]
 
     def sample(self, batch_size):  # 从buffer中采样数据,数量为batch_size
-        pri_size = min(batch_size // 4, len(self.change_buffer))
+        pri_size = min(batch_size // 2, len(self.change_buffer))
         normal_size = batch_size - pri_size
         transition = random.sample(self.buffer, normal_size)
         state, action, action_param, reward, next_state, truncated, done = zip(*transition)

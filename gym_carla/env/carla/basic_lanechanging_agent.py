@@ -13,6 +13,7 @@ import carla
 from enum import Enum
 from collections import deque
 import random
+import numpy as np
 from shapely.geometry import Polygon
 
 from gym_carla.env.util.misc import get_speed, draw_waypoints, is_within_distance, get_trafficlight_trigger_location, compute_distance, get_lane_center
@@ -249,7 +250,7 @@ class Basic_Lanechanging_Agent(object):
                 s = i + 1
         return s
 
-    def run_step(self, current_lane, target_lane, last_action, under_rl, action):
+    def run_step(self, current_lane, target_lane, last_action, under_rl, action, modify_change_steer):
         self.autopilot_step = self.autopilot_step + 1
         """Execute one step of navigation."""
         hazard_detected = False
@@ -295,7 +296,7 @@ class Basic_Lanechanging_Agent(object):
                 new_target_lane = target_lane
         else:
             new_action = action - 1
-            new_target_lane = target_lane
+            new_target_lane = target_lane - new_action
         if under_rl:
             control = None
         else:
@@ -308,6 +309,11 @@ class Basic_Lanechanging_Agent(object):
                                                     'center_wps': self.center_wps,
                                                     'right_wps': self.right_wps,
                                                     'new_action': new_action})
+            if modify_change_steer:
+                if new_action == -1:
+                    control.steer = np.clip(control.steer, -1, 0)
+                elif new_action == 1:
+                    control.steer = np.clip(control.steer, 0, 1)
             if hazard_detected:
                 control = self.add_emergency_stop(control)
         return control, new_target_lane, new_action, [self.distance_to_left_front, self.distance_to_center_front, self.distance_to_right_front], [self.distance_to_left_rear, self.distance_to_center_rear, self.distance_to_right_rear]

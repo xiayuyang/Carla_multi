@@ -31,6 +31,7 @@ clip_grad = 10
 zero_index_gradients = True
 inverting_gradients = False
 train_pdqn = True
+modify_change_steer = False
 base_name = f'origin_{TTC_threshold}_NOCA'
 
 
@@ -41,7 +42,7 @@ def main():
     logging.basicConfig(format='%(levelname)s: %(message)s', level=log_level)
 
     # env=gym.make('CarlaEnv-v0')
-    env = CarlaEnv(args, train_pdqn=train_pdqn)
+    env = CarlaEnv(args, train_pdqn=train_pdqn, modify_change_steer=modify_change_steer)
 
     done = False
     truncated = False
@@ -93,6 +94,7 @@ def main():
                                     action = info['Change']
                                     # action_param = np.array([[info['Steer'], throttle_brake]])
                                     saved_action_param = fill_action_param(action, info['Steer'], throttle_brake, all_action_param)
+                                    print('control in replay buffer: ', action, saved_action_param)
                                     agent.replay_buffer.add(state, action, saved_action_param, reward, next_state, truncated, done, info)
                                 # else:
                                 #     # not work

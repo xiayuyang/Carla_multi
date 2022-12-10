@@ -190,3 +190,7 @@ ARGS.add_argument(
     '--guide_change', type=bool,
     default=True,
     help='guide the vehicle to change via lane_center')
+# ARGS.add_argument(
+#     '--modify_change_steer', type=bool,
+#     default=False,
+#     help='make the steering of left change to [-1, 0], also right to [0, 1], can be used in pdqn')

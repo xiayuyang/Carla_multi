@@ -33,7 +33,7 @@ class SpeedState(Enum):
 
 
 class CarlaEnv:
-    def __init__(self, args, train_pdqn=False) -> None:
+    def __init__(self, args, train_pdqn=False, modify_change_steer=False) -> None:
         super().__init__()
         self.host = args.host
         self.port = args.port
@@ -67,6 +67,7 @@ class CarlaEnv:
         self.throttle_bound = args.throttle_bound
         self.brake_bound = args.brake_bound
         self.train_pdqn = train_pdqn
+        self.modify_change_steer = modify_change_steer
 
         logging.info('listening to server %s:%s', args.host, args.port)
         self.client = carla.Client(self.host, self.port)
@@ -349,7 +350,7 @@ class CarlaEnv:
         """throttle (float):A scalar value to control the vehicle throttle [0.0, 1.0]. Default is 0.0.
                 steer (float):A scalar value to control the vehicle steering [-1.0, 1.0]. Default is 0.0.
                 brake (float):A scalar value to control the vehicle brake [0.0, 1.0]. Default is 0.0."""
-        steer = np.clip(action[0][0], -self.steer_bound, self.steer_bound)
+
         # if action[0][1] >= 0:
         #     jump = action[0][1] * self.throttle_bound
         # else:
@@ -363,6 +364,10 @@ class CarlaEnv:
         # else:
         #     brake = 0
         #     throttle = self.throttle_brake
+        if not self.modify_change_steer:
+            steer = np.clip(action[0][0], -self.steer_bound, self.steer_bound)
+        else:
+            steer = self.process_action(a_index, action[0][0])
         if action[0][1] >= 0:
             brake = 0
             throttle = np.clip(action[0][1], 0, self.throttle_bound)
@@ -386,7 +391,7 @@ class CarlaEnv:
             print("debug mode: current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                   self.target_lane, self.new_target_lane, self.last_action, self.new_action)
             control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
-                self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1)
+                self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1, self.modify_change_steer)
             print("debug mode: current lane, target lane, new_target_lane, last action, new action: ",
                   self.current_lane, self.target_lane, self.new_target_lane, self.last_action, self.new_action)
             self.target_lane = self.new_target_lane
@@ -395,7 +400,7 @@ class CarlaEnv:
             if not self.debug:
                 if not self.RL_switch and not self.TM_switch:
                     # Add noise to autopilot controller's control command
-                    print(f"Basic Agent Control Before Noise:{control}")
+                    # print(f"Basic Agent Control Before Noise:{control}")
                     control.steer = np.clip(np.random.normal(control.steer,self.control_sigma['Steer']),-self.steer_bound,self.steer_bound)
                     if control.throttle > 0:
                         throttle_brake = control.throttle
@@ -470,7 +475,7 @@ class CarlaEnv:
                 self.rear_vel_deque.append(get_speed(self.vehicle_inlane[4], False))
             else:
                 self.rear_vel_deque.append(-1)
-            """Attention: The sequence of following code is pivotal, do not recklessly chage their execution order"""
+            """Attention: The sequence of following code is pivotal, do not recklessly change their execution order"""
             reward = self._get_reward(self.last_action, last_lane, self.current_lane, self.distance_to_front_vehicles, self.distance_to_rear_vehicles)
             state = self._get_state({'state_waypoints': self.state_waypoints, 'vehicle_inlane': self.vehicle_inlane})
             self.step_info.update({'Reward': reward})
@@ -540,14 +545,34 @@ class CarlaEnv:
     def render(self, mode):
         pass
 
-    def process_lane_wp(self, wps_list, ego_vehicle_z, ego_forward_vector, my_sample_ratio, flag, t):
+    def process_action(self, a_index, steer):
+        # left: steering is negative[-1, 0], right: steering is positive[0, 1]
+        processed_steer = steer
+        if a_index == 0:
+            processed_steer = steer * 0.5 - 0.5
+        elif a_index == 2:
+            processed_steer = steer * 0.5 + 0.5
+        return processed_steer
+
+    def recovery_action(self, action, action_param):
+        # recovery [-1, 1] from left change and right change
+        steer = action_param[2*action]
+        if action == 0:
+            steer = np.clip(steer, -1, 0.1)
+            steer = (steer + 0.5) * 2
+        elif action == 2:
+            steer = np.clip(steer, -0.1, 1)
+            steer = (steer - 0.5) * 2
+        return steer
+
+    def process_lane_wp(self, lane_width, wps_list, ego_vehicle_z, ego_forward_vector, my_sample_ratio, flag, t):
         wps = []
         idx = 0
         final_t = t
         if flag == -1:
-            final_t = 1.5 + t
+            final_t = lane_width / 2 + t
         elif flag == 1:
-            final_t = 1.5 - t
+            final_t = lane_width / 2 - t
 
         for wp in wps_list:
             delta_z = wp.transform.location.z - ego_vehicle_z
@@ -646,21 +671,22 @@ class CarlaEnv:
         #     for _ in range(gap):
         #         wps.append([(len(wps) + 1) * self.sampling_resolution / wps_length, 0])
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
+        lane_width = lane_center.lane_width
         right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
         t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
 
-        ego_vehicle_z = get_lane_center(self.map, self.ego_vehicle.get_location()).transform.location.z
+        ego_vehicle_z = lane_center.transform.location.z
         ego_forward_vector = self.ego_vehicle.get_transform().get_forward_vector()
         my_sample_ratio = self.buffer_size // 10
-        center_wps_processed = self.process_lane_wp(center_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 0, t)
+        center_wps_processed = self.process_lane_wp(lane_width, center_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 0, t)
         if len(left_wps) == 0:
             left_wps_processed = center_wps_processed.copy()
         else:
-            left_wps_processed = self.process_lane_wp(left_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, -1, t)
+            left_wps_processed = self.process_lane_wp(lane_width, left_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, -1, t)
         if len(right_wps) == 0:
             right_wps_processed = center_wps_processed.copy()
         else:
-            right_wps_processed = self.process_lane_wp(right_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 1, t)
+            right_wps_processed = self.process_lane_wp(lane_width, right_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 1, t)
 
         left_wall = False
         if len(left_wps) == 0:
@@ -712,7 +738,7 @@ class CarlaEnv:
                 'right_waypoints': right_wps_processed, 'ego_vehicle': [v_s/10, v_t/10, a_s/3, a_t/3, t, yaw_diff_ego/90],
                 'vehicle_info': vehicle_inlane_processed}
 
-    def calculate_lane_change_reward(self, last_action, last_lane, current_lane, distance_to_front_vehicles, distance_to_rear_vehicles):
+    def calculate_lane_change_reward(self, last_action, last_lane, current_lane, current_action, distance_to_front_vehicles, distance_to_rear_vehicles):
         print('distance_to_front_vehicles, distance_to_rear_vehicles: ', distance_to_front_vehicles, distance_to_rear_vehicles)
         # still the distances of the last time step
         reward = 0
@@ -725,9 +751,9 @@ class CarlaEnv:
                 reward = min((right_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
             else:
                 reward = max((right_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
-            print('reward1: ', reward)
-            reward = reward + self.calculate_rear_ttc_reward()
-            print('reward2: ', reward)
+            rear_ttc_reward = self.calculate_rear_ttc_reward()
+            reward = reward + rear_ttc_reward
+            print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
         elif current_lane - last_lane == 1:
             # change left
             self.calculate_impact = True
@@ -736,10 +762,12 @@ class CarlaEnv:
                 reward = min((left_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
             else:
                 reward = max((left_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
-            print('reward1: ', reward)
-            reward = reward + self.calculate_rear_ttc_reward()
-            print('reward2: ', reward)
-
+            rear_ttc_reward = self.calculate_rear_ttc_reward()
+            reward = reward + rear_ttc_reward
+            print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
+        if current_action == 0:
+            # if change lane in lane following mode
+            reward = self.penalty
         return reward
 
     def _get_reward(self, last_action, last_lane, current_lane, distance_to_front_vehicles, distance_to_rear_vehicles):
@@ -830,11 +858,12 @@ class CarlaEnv:
             self.calculate_impact = False
 
         # reward for lane_changing
-        lane_changing_reward = self.calculate_lane_change_reward(last_action, last_lane, current_lane, distance_to_front_vehicles, distance_to_rear_vehicles)
+        lane_changing_reward = self.calculate_lane_change_reward(last_action, last_lane, current_lane, self.new_action,
+                                                                 distance_to_front_vehicles, distance_to_rear_vehicles)
 
         self.step_info = {'velocity': v_s, 'offlane': Lcen, 'yaw_diff': yaw_diff, 'TTC': fTTC, 'Comfort': fCom,
                           'Efficiency': fEff, 'Lane_center': fLcen, 'Yaw': fYaw, 'last_acc': self.last_acc, 'cur_acc': cur_acc,
-                          'yaw_change': yaw_change,
+                          'yaw_change': yaw_change, 't': t,
                           'lane_changing_reward': lane_changing_reward, 'impact': impact, 'Abandon': False}
         print('reward_info: ', self.step_info)
         if self._truncated():
@@ -849,7 +878,7 @@ class CarlaEnv:
             else:
                 return - self.penalty
         else:
-            return fTTC + fEff + fCom + fLcen + impact + lane_changing_reward
+            return fTTC + fEff * 2 + fCom + fLcen + impact + lane_changing_reward
 
     def get_acc_s(self, acc, yaw_forward):
         acc.z = 0
@@ -864,6 +893,7 @@ class CarlaEnv:
     def pdqn_lane_center(self, lane_center, ego_location, action, t):
         Lcen = lane_center.transform.location.distance(ego_location)
         lane_wid = lane_center.lane_width
+        print('pdqn_lane_center: Lcen, lane_wid, t: ', Lcen, lane_wid, t)
         if not test_waypoint(lane_center, True) or Lcen > lane_wid / 2 + 0.1:
             fLcen = -2
             print('lane_center.lane_id, lane_center.roaf_id, lcen, flcen, lane_wid/2: ', lane_center.lane_id,
@@ -878,6 +908,7 @@ class CarlaEnv:
             elif action == 1:
                 Lcen = lane_wid - t
                 fLcen = -Lcen / lane_wid
+            print('pdqn_lane_center: Lcen, fLcen: ', Lcen, fLcen)
         return Lcen, fLcen
 
     def compute_comfort(self, last_acc, acc, last_yaw, yaw):
@@ -912,7 +943,7 @@ class CarlaEnv:
                 # print(
                 #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
                 if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
-                    fLcen = -1.5
+                    fLcen = -2
                     print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
                 else:
                     fLcen = - Lcen / (lane_center.lane_width / 2)
@@ -967,7 +998,7 @@ class CarlaEnv:
                               self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
                               self.new_action)
                         control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
-                            self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1)
+                            self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1, self.modify_change_steer)
                         print("basic_lanechanging_agent: current lane, target lane, new_target_lane, last action, new action: ",
                               self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
                               self.new_action)
@@ -985,9 +1016,11 @@ class CarlaEnv:
                 print("rl_control: current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                       self.target_lane, self.new_target_lane, self.last_action, self.new_action)
                 fake_control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
-                    self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, True, a_index)
+                    self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, True, a_index, self.modify_change_steer)
                 print("rl_control: current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                       self.target_lane, self.new_target_lane, self.last_action, self.new_action)
+                self.target_lane = self.new_target_lane
+                self.last_action = self.new_action
                 if ego_speed < self.speed_min:
                     # Only add reboot state in the beginning 200 episodes
                     # self._ego_autopilot(True)
@@ -1006,7 +1039,7 @@ class CarlaEnv:
                     print("basic_lanechanging_agent: current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                           self.target_lane, self.new_target_lane, self.last_action, self.new_action)
                     control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
-                        self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1)
+                        self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1, self.modify_change_steer)
                     print("basic_lanechanging_agent: current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                           self.target_lane, self.new_target_lane, self.last_action, self.new_action)
                     self.target_lane = self.new_target_lane
