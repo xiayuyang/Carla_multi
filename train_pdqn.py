@@ -28,10 +28,10 @@ TOTAL_EPISODE = 3000
 SIGMA_DECAY = 0.9998
 TTC_threshold = 4.001
 clip_grad = 10
-zero_index_gradients = False
+zero_index_gradients = True
 inverting_gradients = False
 train_pdqn = True
-modify_change_steer = False
+modify_change_steer = True
 base_name = f'origin_{TTC_threshold}_NOCA'
 
 
@@ -94,6 +94,7 @@ def main():
                                         # under rl control
                                         agent.replay_buffer.add(state, action, all_action_param, reward, next_state,
                                                                 truncated, done, info)
+                                        print('control in replay buffer: ', action, all_action_param)
                                     else:
                                         # Input the guided action to replay buffer
                                         throttle_brake = -info['Brake'] if info['Brake'] > 0 else info['Throttle']
