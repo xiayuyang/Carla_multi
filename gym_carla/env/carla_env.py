@@ -104,6 +104,7 @@ class CarlaEnv:
         self.state_waypoints = None
         self.draw_waypoints = None
 
+        self.last_lane = None
         self.current_lane = None
         self.target_lane = None
         self.last_action = None
@@ -237,6 +238,7 @@ class CarlaEnv:
         # self.local_planner.set_global_plan(self.global_planner.get_route(
         #      self.map.get_waypoint(self.ego_vehicle.get_location())))
         self.current_lane = get_lane_center(self.map, self.ego_vehicle.get_location()).lane_id
+        self.last_lane = self.current_lane
         self.target_lane = self.current_lane
         self.new_target_lane = self.current_lane
         print('current lane, target lane', self.current_lane, self.target_lane)
@@ -256,7 +258,7 @@ class CarlaEnv:
                                                         'max_brake': self.brake_bound})
         # self.control_sigma={'Steer':random.choice([0.3, 0.4, 0.5]),
         #                 'Throttle_brake':random.choice([0.4,0.5,0.6])}
-        self.control_sigma = {'Steer': random.choice([0, 0.05, 0.1, 0.15, 0.2]),
+        self.control_sigma = {'Steer': random.choice([0, 0.05, 0.1, 0.15]),
                             'Throttle_brake': random.choice([0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4])}
         # self.control_sigma={'Steer': random.choice([0,0]),
         #                     'Throttle_brake': random.choice([0,0])}
@@ -388,8 +390,8 @@ class CarlaEnv:
             #     # self.autopilot_controller.set_destination(random.choice(self.spawn_points).location)
             #     self.autopilot_controller.set_destination(self.my_set_destination())
             # control = self.autopilot_controller.run_step()
-            print("debug mode: current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
-                  self.target_lane, self.new_target_lane, self.last_action, self.new_action)
+            print("debug mode: current lane, target lane, new_target_lane, last action, new action: ",
+                  self.current_lane, self.target_lane, self.new_target_lane, self.last_action, self.new_action)
             control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
                 self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1, self.modify_change_steer)
             print("debug mode: current lane, target lane, new_target_lane, last action, new action: ",
@@ -441,7 +443,7 @@ class CarlaEnv:
             # if self.is_effective_action():
             control = self.ego_vehicle.get_control()
             print("steering, throttle, brake, change: ", control, self.new_action)
-            last_lane = self.current_lane
+            self.last_lane = self.current_lane
             # print('4')
             self.current_lane = get_lane_center(self.map, self.ego_vehicle.get_location()).lane_id
             # print(self.ego_vehicle.get_speed_limit(),get_speed(self.ego_vehicle,False),get_acceleration(self.ego_vehicle,False),sep='\t')
@@ -476,7 +478,7 @@ class CarlaEnv:
             else:
                 self.rear_vel_deque.append(-1)
             """Attention: The sequence of following code is pivotal, do not recklessly change their execution order"""
-            reward = self._get_reward(self.last_action, last_lane, self.current_lane, self.distance_to_front_vehicles, self.distance_to_rear_vehicles)
+            reward = self._get_reward(self.last_action, self.last_lane, self.current_lane, self.distance_to_front_vehicles, self.distance_to_rear_vehicles)
             state = self._get_state({'state_waypoints': self.state_waypoints, 'vehicle_inlane': self.vehicle_inlane})
             self.step_info.update({'Reward': reward})
             lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
@@ -500,7 +502,11 @@ class CarlaEnv:
             if self.speed_state == SpeedState.RUNNING and self.RL_switch == True:
                 self.rl_control_step += 1
             # new_action \in [-1, 0, 1], but saved action is the index of max Q(s, a), and thus change \in [0, 1, 2]
-            control_info = {'Steer': control.steer, 'Throttle': control.throttle, 'Brake': control.brake, 'Change': self.new_action+1}
+            if self.RL_switch:
+                control_state = True
+            else:
+                control_state = False
+            control_info = {'Steer': control.steer, 'Throttle': control.throttle, 'Brake': control.brake, 'Change': self.new_action+1, 'control_state': control_state}
             print(f"Ego Vehicle Speed Limit:{self.ego_vehicle.get_speed_limit() * 3.6}\n"
                   f"Episode:{self.reset_step}, Total_step:{self.total_step}, Time_step:{self.time_step}, RL_control_step:{self.rl_control_step}, \n"
                   f"Vel: {get_speed(self.ego_vehicle, False)}, Acc:{get_acceleration(self.ego_vehicle, False)}, distance:{state['vehicle_info'][0][0] * self.vehicle_proximity}, \n"
@@ -767,7 +773,7 @@ class CarlaEnv:
             print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
         if current_action == 0:
             # if change lane in lane following mode
-            reward = self.penalty
+            reward = 0
         return reward
 
     def _get_reward(self, last_action, last_lane, current_lane, distance_to_front_vehicles, distance_to_rear_vehicles):
@@ -860,11 +866,14 @@ class CarlaEnv:
         # reward for lane_changing
         lane_changing_reward = self.calculate_lane_change_reward(last_action, last_lane, current_lane, self.new_action,
                                                                  distance_to_front_vehicles, distance_to_rear_vehicles)
+        # flag: In the lane follow mode, the ego vehicle pass the lane
+        change_in_lane_follow = self.new_action == 0 and current_lane != last_lane
 
         self.step_info = {'velocity': v_s, 'offlane': Lcen, 'yaw_diff': yaw_diff, 'TTC': fTTC, 'Comfort': fCom,
                           'Efficiency': fEff, 'Lane_center': fLcen, 'Yaw': fYaw, 'last_acc': self.last_acc, 'cur_acc': cur_acc,
                           'yaw_change': yaw_change, 't': t,
-                          'lane_changing_reward': lane_changing_reward, 'impact': impact, 'Abandon': False}
+                          'lane_changing_reward': lane_changing_reward, 'impact': impact, 'change_in_lane_follow': change_in_lane_follow, 'Abandon': False}
+
         print('reward_info: ', self.step_info)
         if self._truncated():
             history, tags = self.collision_sensor.get_collision_history()
@@ -1011,7 +1020,7 @@ class CarlaEnv:
                       self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
                       self.new_action)
         elif self.speed_state == SpeedState.RUNNING:
-            if self.RL_switch == True:
+            if self.RL_switch:
                 # under rl control, used to set the self.new_action.
                 print("rl_control: current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
                       self.target_lane, self.new_target_lane, self.last_action, self.new_action)
@@ -1059,6 +1068,9 @@ class CarlaEnv:
         if len(self.collision_sensor.get_collision_history()[0]) != 0:
             # Here we judge speed state because there might be collision event when spawning vehicles
             logging.warn('collison happend')
+            return True
+        if self.new_action == 0 and self.current_lane != self.last_lane:
+            logging.warn('change lane in lane following mode')
             return True
         if self.map.get_waypoint(self.ego_vehicle.get_location()) is None:
             logging.warn('vehicle drive out of road')
@@ -1285,7 +1297,12 @@ class CarlaEnv:
                 self.traffic_manager.ignore_lights_percentage(
                     self.world.get_actor(response.actor_id), 100)
                 self.traffic_manager.auto_lane_change(
-                    self.world.get_actor(response.actor_id), False)
+                    self.world.get_actor(response.actor_id), True)
+                # modify change probability
+                # self.traffic_manager.random_left_lanechange_percentage(
+                #     self.world.get_actor(response.actor_id), 10)
+                # self.traffic_manager.random_right_lanechange_percentage(
+                #     self.world.get_actor(response.actor_id), 10)
                 self.traffic_manager.ignore_signs_percentage(
                     self.world.get_actor(response.actor_id), 100)
                 self.traffic_manager.ignore_walkers_percentage(

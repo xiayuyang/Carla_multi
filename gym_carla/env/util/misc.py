@@ -80,10 +80,40 @@ def draw_waypoints(world, waypoints, life_time=0.0, z=0.5):
         end = begin + carla.Location(x=math.cos(angle), y=math.sin(angle))
         world.debug.draw_arrow(begin, end, arrow_size=0.3, life_time=life_time)
 
-def fill_action_param(action, steer, throttle_brake, action_param):
-    action_param[0][action*2] = steer
-    action_param[0][action*2+1] = throttle_brake
+def fill_action_param(action, steer, throttle_brake, action_param, modify_change_steer):
+    if not modify_change_steer:
+        action_param[0][action*2] = steer
+        action_param[0][action*2+1] = throttle_brake
+    else:
+        if action == 0:
+            steer = np.clip(steer, -1, 0)
+            steer = (steer + 0.5) * 2
+        elif action == 2:
+            steer = np.clip(steer, 0, 1)
+            steer = (steer - 0.5) * 2
+        action_param[0][action*2] = steer
+        action_param[0][action*2+1] = throttle_brake
     return action_param
+
+def process_action(a_index, steer):
+    # left: steering is negative[-1, 0], right: steering is positive[0, 1]
+    processed_steer = steer
+    if a_index == 0:
+        processed_steer = steer * 0.5 - 0.5
+    elif a_index == 2:
+        processed_steer = steer * 0.5 + 0.5
+    return processed_steer
+
+def recovery_action(action, action_param):
+    # recovery [-1, 1] from left change and right change
+    steer = action_param[2*action]
+    if action == 0:
+        steer = np.clip(steer, -1, 0.1)
+        steer = (steer + 0.5) * 2
+    elif action == 2:
+        steer = np.clip(steer, -0.1, 1)
+        steer = (steer - 0.5) * 2
+    return steer
 
 def _retrieve_options(list_waypoints, current_waypoint):
     """

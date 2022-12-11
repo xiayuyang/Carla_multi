@@ -28,7 +28,7 @@ TOTAL_EPISODE = 3000
 SIGMA_DECAY = 0.9998
 TTC_threshold = 4.001
 clip_grad = 10
-zero_index_gradients = True
+zero_index_gradients = False
 inverting_gradients = False
 train_pdqn = True
 modify_change_steer = False
@@ -89,13 +89,19 @@ def main():
                             next_state, reward, truncated, done, info = env.step(action, action_param)
                             if env.is_effective_action() and not info['Abandon']:
                                 if 'Throttle' in info:
-                                    # Input the guided action to replay buffer
-                                    throttle_brake = -info['Brake'] if info['Brake'] > 0 else info['Throttle']
-                                    action = info['Change']
-                                    # action_param = np.array([[info['Steer'], throttle_brake]])
-                                    saved_action_param = fill_action_param(action, info['Steer'], throttle_brake, all_action_param)
-                                    print('control in replay buffer: ', action, saved_action_param)
-                                    agent.replay_buffer.add(state, action, saved_action_param, reward, next_state, truncated, done, info)
+                                    control_state = info['control_state']
+                                    if control_state:
+                                        # under rl control
+                                        agent.replay_buffer.add(state, action, all_action_param, reward, next_state,
+                                                                truncated, done, info)
+                                    else:
+                                        # Input the guided action to replay buffer
+                                        throttle_brake = -info['Brake'] if info['Brake'] > 0 else info['Throttle']
+                                        action = info['Change']
+                                        # action_param = np.array([[info['Steer'], throttle_brake]])
+                                        saved_action_param = fill_action_param(action, info['Steer'], throttle_brake, all_action_param, modify_change_steer)
+                                        print('control in replay buffer: ', action, saved_action_param)
+                                        agent.replay_buffer.add(state, action, saved_action_param, reward, next_state, truncated, done, info)
                                 # else:
                                 #     # not work
                                 #     # Input the agent action to replay buffer
@@ -129,8 +135,8 @@ def main():
 
                             if env.total_step == args.pre_train_steps:
                                 agent.save_net('./out/ddpg_pre_trained.pth')
-
-                            if env.rl_control_step > 10000 and env.is_effective_action() and \
+                            # TODO: modify rl_control_step
+                            if env.rl_control_step > 1000 and env.is_effective_action() and \
                                     env.RL_switch and SIGMA > 0.01:
                                 globals()['SIGMA'] *= SIGMA_DECAY
                                 agent.set_sigma(SIGMA)
