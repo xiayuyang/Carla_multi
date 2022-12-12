@@ -768,7 +768,7 @@ class CarlaEnv:
         center_front_dis = distance_to_front_vehicles[1]
         if current_lane - last_lane == -1:
             # change right
-            self.calculate_impact = True
+            # self.calculate_impact = True
             right_front_dis = distance_to_front_vehicles[2]
             if right_front_dis > center_front_dis:
                 reward = min((right_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
@@ -780,7 +780,7 @@ class CarlaEnv:
             print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
         elif current_lane - last_lane == 1:
             # change left
-            self.calculate_impact = True
+            # self.calculate_impact = True
             left_front_dis = distance_to_front_vehicles[0]
             if left_front_dis > center_front_dis:
                 reward = min((left_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)

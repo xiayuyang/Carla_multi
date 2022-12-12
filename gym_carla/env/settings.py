@@ -147,7 +147,7 @@ ARGS.add_argument(
     help='Speed limit for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_threshold', type=float,
-    default=20.0,
+    default=36.0,
     help='Speed threshold for ego vehicle, start phase for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_min', type=float,
