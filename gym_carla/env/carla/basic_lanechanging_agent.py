@@ -316,7 +316,8 @@ class Basic_Lanechanging_Agent(object):
                     control.steer = np.clip(control.steer, 0, 1)
             if hazard_detected:
                 control = self.add_emergency_stop(control)
-        return control, new_target_lane, new_action, [self.distance_to_left_front, self.distance_to_center_front, self.distance_to_right_front], [self.distance_to_left_rear, self.distance_to_center_rear, self.distance_to_right_rear]
+        return control, new_target_lane, new_action, [self.distance_to_left_front, self.distance_to_center_front, self.distance_to_right_front], \
+               [self.distance_to_left_rear, self.distance_to_center_rear, self.distance_to_right_rear]
 
     def ignore_traffic_lights(self, active=True):
         """(De)activates the checks for traffic lights"""

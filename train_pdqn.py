@@ -12,6 +12,8 @@ from gym_carla.env.util.misc import fill_action_param
 
 # neural network hyper parameters
 SIGMA = 0.5
+SIGMA_STEER = 0.3
+SIGMA_ACC = 0.5
 THETA = 0.05
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 LR_ACTOR = 0.001
@@ -24,14 +26,16 @@ MINIMAL_SIZE = 10000
 BATCH_SIZE = 128
 REPLACE_A = 500
 REPLACE_C = 300
-TOTAL_EPISODE = 3000
-SIGMA_DECAY = 0.9998
+TOTAL_EPISODE = 50000
+SIGMA_DECAY = 0.9999
 TTC_threshold = 4.001
 clip_grad = 10
 zero_index_gradients = True
 inverting_gradients = False
 train_pdqn = True
 modify_change_steer = True
+action_mask = True
+remove_lane_center_in_change = False
 base_name = f'origin_{TTC_threshold}_NOCA'
 
 
@@ -42,7 +46,7 @@ def main():
     logging.basicConfig(format='%(levelname)s: %(message)s', level=log_level)
 
     # env=gym.make('CarlaEnv-v0')
-    env = CarlaEnv(args, train_pdqn=train_pdqn, modify_change_steer=modify_change_steer)
+    env = CarlaEnv(args, train_pdqn=train_pdqn, modify_change_steer=modify_change_steer, remove_lane_center_in_change=remove_lane_center_in_change)
 
     done = False
     truncated = False
@@ -58,7 +62,7 @@ def main():
     result = []
 
     for run in [base_name]:
-        agent = P_DQN(s_dim, a_dim, a_bound, GAMMA, TAU, SIGMA, THETA, EPSILON, BUFFER_SIZE, BATCH_SIZE, LR_ACTOR,
+        agent = P_DQN(s_dim, a_dim, a_bound, GAMMA, TAU, SIGMA_STEER, SIGMA, SIGMA_ACC, THETA, EPSILON, BUFFER_SIZE, BATCH_SIZE, LR_ACTOR,
                      LR_CRITIC, clip_grad, zero_index_gradients, inverting_gradients, DEVICE)
 
         # training part
@@ -84,8 +88,8 @@ def main():
                         score_s, score_e, score_c = 0, 0, 0  # part objective scores
 
                         while not done and not truncated:
-                            action, action_param, all_action_param = agent.take_action(state)
-
+                            lane_id = env.get_ego_lane()
+                            action, action_param, all_action_param = agent.take_action(state, lane_id=lane_id, action_mask=action_mask)
                             next_state, reward, truncated, done, info = env.step(action, action_param)
                             if env.is_effective_action() and not info['Abandon']:
                                 if 'Throttle' in info:
@@ -94,15 +98,17 @@ def main():
                                         # under rl control
                                         agent.replay_buffer.add(state, action, all_action_param, reward, next_state,
                                                                 truncated, done, info)
-                                        print('control in replay buffer: ', action, all_action_param)
+                                        print('rl control in replay buffer: ', action, all_action_param)
                                     else:
                                         # Input the guided action to replay buffer
                                         throttle_brake = -info['Brake'] if info['Brake'] > 0 else info['Throttle']
                                         action = info['Change']
                                         # action_param = np.array([[info['Steer'], throttle_brake]])
-                                        saved_action_param = fill_action_param(action, info['Steer'], throttle_brake, all_action_param, modify_change_steer)
-                                        print('control in replay buffer: ', action, saved_action_param)
-                                        agent.replay_buffer.add(state, action, saved_action_param, reward, next_state, truncated, done, info)
+                                        saved_action_param = fill_action_param(action, info['Steer'], throttle_brake,
+                                                                               all_action_param, modify_change_steer)
+                                        print('agent control in replay buffer: ', action, saved_action_param)
+                                        agent.replay_buffer.add(state, action, saved_action_param, reward, next_state,
+                                                                truncated, done, info)
                                 # else:
                                 #     # not work
                                 #     # Input the agent action to replay buffer
@@ -125,7 +131,9 @@ def main():
                                 print()
 
                             if agent.replay_buffer.size() > MINIMAL_SIZE:
-                                logging.info("Learn begin %f" % SIGMA)
+                                # logging.info("Learn begin: %f", SIGMA_STEER)
+                                logging.info("Learn begin: %f", SIGMA_STEER)
+                                logging.info("Learn begin: %f", SIGMA_ACC)
                                 agent.learn()
 
                             state = next_state
@@ -137,10 +145,12 @@ def main():
                             if env.total_step == args.pre_train_steps:
                                 agent.save_net('./out/ddpg_pre_trained.pth')
                             # TODO: modify rl_control_step
-                            if env.rl_control_step > 1000 and env.is_effective_action() and \
+                            if env.rl_control_step > 10000 and env.is_effective_action() and \
                                     env.RL_switch and SIGMA > 0.01:
                                 globals()['SIGMA'] *= SIGMA_DECAY
-                                agent.set_sigma(SIGMA)
+                                globals()['SIGMA_STEER'] *= SIGMA_DECAY
+                                globals()['SIGMA_ACC'] *= SIGMA_DECAY
+                                agent.set_sigma(SIGMA_STEER, SIGMA_ACC)
 
                         if done or truncated:
                             # restart the training

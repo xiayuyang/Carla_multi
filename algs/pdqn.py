@@ -21,7 +21,8 @@ class ReplayBuffer:
         next_state = self._compress(next_state)
         lane_center = info["offlane"]
         reward_ttc = info["TTC"]
-        if reward_ttc < -0.1:
+        reward_eff = info["velocity"]
+        if reward_ttc < -0.1 or reward_eff < 3:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         if action == 0 or action == 2:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
@@ -178,7 +179,7 @@ class QValueNet_multi(torch.nn.Module):
 
 
 class P_DQN:
-    def __init__(self, state_dim, action_dim, action_bound, gamma, tau, sigma, theta, epsilon,
+    def __init__(self, state_dim, action_dim, action_bound, gamma, tau, sigma, sigma_steer, sigma_acc, theta, epsilon,
                  buffer_size, batch_size, actor_lr, critic_lr, clip_grad, zero_index_gradients, inverting_gradients, device) -> None:
         self.learn_time = 0
         self.replace_a = 0
@@ -196,6 +197,7 @@ class P_DQN:
         self.action_parameter_min_numpy = np.array([-1, -1, -1, -1, -1, -1])
         self.action_parameter_range_numpy = np.array([2, 2, 2, 2, 2, 2])
         self.gamma, self.tau, self.sigma, self.epsilon = gamma, tau, sigma, epsilon  # sigma:高斯噪声的标准差，均值直接设置为0
+        self.steer_noise, self.tb_noise = sigma_steer, sigma_acc
         self.buffer_size, self.batch_size, self.device = buffer_size, batch_size, device
         self.actor_lr, self.critic_lr = actor_lr, critic_lr
         self.clip_grad = clip_grad
@@ -229,7 +231,7 @@ class P_DQN:
         # self.steer_noise = OrnsteinUhlenbeckActionNoise(self.sigma, self.theta)
         # self.tb_noise = OrnsteinUhlenbeckActionNoise(self.sigma, self.theta)
 
-    def take_action(self, state):
+    def take_action(self, state, lane_id=-2, action_mask=True):
         # print('vehicle_info', state['vehicle_info'])
         state_left_wps = torch.tensor(state['left_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
         state_center_wps = torch.tensor(state['center_waypoints'], dtype=torch.float32).view(1, -1).to(self.device)
@@ -248,10 +250,15 @@ class P_DQN:
         all_action_param = self.actor(state_)
         q_a = self.critic(state_, all_action_param).unsqueeze(0)
         q_a = q_a.detach().cpu().numpy()
+        if lane_id == -3:
+            q_a[2] = -1000000.0
+        elif lane_id == -1:
+            q_a[0] = -1000000.0
         action = np.argmax(q_a)
         action_param = all_action_param[:, self.action_parameter_offsets[action]:self.action_parameter_offsets[action+1]]
 
-        print(f'Network Output - Steer: {action_param[0][0]}, Throttle_brake: {action_param[0][1]}')
+        print(f'Network Output - Action: {action}, Steer: {action_param[0][0]}, Throttle_brake: {action_param[0][1]}')
+        print('q values: ', q_a)
         if (action_param[0, 0].is_cuda):
             action_param = np.array([action_param[:, 0].detach().cpu().numpy(), action_param[:, 1].detach().cpu().numpy()]).reshape((-1, 2))
             all_action_param = np.array([all_action_param[:, 0].detach().cpu().numpy(), all_action_param[:, 1].detach().cpu().numpy(),
@@ -264,8 +271,8 @@ class P_DQN:
                                         all_action_param[:, 4].detach().numpy(), all_action_param[:, 5].detach().numpy()]).reshape((-1, 6))
         # if np.random.random()<self.epsilon:
         if self.train:
-            action_param[:, 0] = np.clip(np.random.normal(action_param[:, 0], self.sigma), -1, 1)
-            action_param[:, 1] = np.clip(np.random.normal(action_param[:, 1], self.sigma), -1, 1)
+            action_param[:, 0] = np.clip(np.random.normal(action_param[:, 0], self.steer_noise), -1, 1)
+            action_param[:, 1] = np.clip(np.random.normal(action_param[:, 1], self.tb_noise), -1, 1)
         # if self.train:
         #     action[:,0]=np.clip(action[:,0]+self.steer_noise(),-1,1)
         #     action[:,1]=np.clip(action[:,1]+self.tb_noise(),-1,1)
@@ -367,7 +374,7 @@ class P_DQN:
         self.critic.zero_grad()
         Q_loss.backward()
         from copy import deepcopy
-        print('check batch_s whether has grad: ', batch_s.grad_fn)
+        # print('check batch_s whether has grad: ', batch_s.grad_fn)
         delta_a = deepcopy(action_param.grad.data)
 
         action_param = self.actor(Variable(batch_s))
@@ -389,10 +396,10 @@ class P_DQN:
         for name, parms in model.named_parameters():
             print('-->name:', name, '-->grad_requirs:', parms.requires_grad, ' -->grad_value:', parms.grad)
 
-    def set_sigma(self, sigma):
-        self.sigma = sigma
-        # self.steer_noise.set_sigma(sigma)
-        # self.tb_noise.set_sigma(sigma)
+    def set_sigma(self, sigma_steer, sigma_acc):
+        # self.sigma = sigma
+        self.steer_noise = sigma_steer
+        self.tb_noise = sigma_acc
 
     def reset_noise(self):
         pass

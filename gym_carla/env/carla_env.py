@@ -33,7 +33,7 @@ class SpeedState(Enum):
 
 
 class CarlaEnv:
-    def __init__(self, args, train_pdqn=False, modify_change_steer=False) -> None:
+    def __init__(self, args, train_pdqn=False, modify_change_steer=False, remove_lane_center_in_change=False) -> None:
         super().__init__()
         self.host = args.host
         self.port = args.port
@@ -68,6 +68,7 @@ class CarlaEnv:
         self.brake_bound = args.brake_bound
         self.train_pdqn = train_pdqn
         self.modify_change_steer = modify_change_steer
+        self.remove_lane_center_in_change = remove_lane_center_in_change
 
         logging.info('listening to server %s:%s', args.host, args.port)
         self.client = carla.Client(self.host, self.port)
@@ -267,7 +268,7 @@ class CarlaEnv:
                                     'ignore_stop_signs': True, 'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
                                     'sampling_radius': self.sampling_resolution, 'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,
                                     'max_brake': self.brake_bound, 'buffer_size': self.buffer_size, 'ignore_front_vehicle': random.choice([True, False]),
-                                    'ignore_change_gap': random.choice([True, False]), 'lanechanging_fps': random.choice([40, 50, 60])})
+                                    'ignore_change_gap': random.choice([True, True, False]), 'lanechanging_fps': random.choice([40, 50, 60])})
 
 
         # code for synchronous mode
@@ -403,7 +404,19 @@ class CarlaEnv:
                 if not self.RL_switch and not self.TM_switch:
                     # Add noise to autopilot controller's control command
                     # print(f"Basic Agent Control Before Noise:{control}")
-                    control.steer = np.clip(np.random.normal(control.steer,self.control_sigma['Steer']),-self.steer_bound,self.steer_bound)
+                    if not self.modify_change_steer:
+                        control.steer = np.clip(np.random.normal(control.steer, self.control_sigma['Steer']),
+                                                -self.steer_bound, self.steer_bound)
+                    else:
+                        if self.new_action == -1:
+                            control.steer = np.clip(np.random.normal(control.steer,self.control_sigma['Steer']),
+                                                    -self.steer_bound, 0)
+                        elif self.new_action == 0:
+                            control.steer = np.clip(np.random.normal(control.steer, self.control_sigma['Steer']),
+                                                    -self.steer_bound, self.steer_bound)
+                        else:
+                            control.steer = np.clip(np.random.normal(control.steer, self.control_sigma['Steer']),
+                                                    0, self.steer_bound)
                     if control.throttle > 0:
                         throttle_brake = control.throttle
                     else:
@@ -596,6 +609,9 @@ class CarlaEnv:
         ego_bounding_y = self.ego_vehicle.bounding_box.extent.y
         max_speed = self.speed_limit
         all_v_info = []
+        right_lane_dis = lane_center.get_right_lane().transform.location.distance(
+            self.ego_vehicle.get_location())
+        t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
         print('vehicle_inlane: ', vehicle_inlane)
         for i in range(6):
             veh = vehicle_inlane[i]
@@ -606,15 +622,15 @@ class CarlaEnv:
                 wall = True
             if wall:
                 if i < 3:
-                    v_info = [0.001, 0, 0]
+                    v_info = [0.001, 0, t]
                 else:
-                    v_info = [-0.001, 0, 0]
+                    v_info = [-0.001, 0, t]
             else:
                 if veh is None:
                     if i < 3:
-                        v_info = [1, 0, 0]
+                        v_info = [1, 0, t]
                     else:
-                        v_info = [-1, 0, 0]
+                        v_info = [-1, 0, t]
                 else:
                     veh_speed = get_speed(veh, False)
                     rel_speed = ego_speed - veh_speed
@@ -624,27 +640,28 @@ class CarlaEnv:
                         max(abs(veh.bounding_box.extent.x), abs(veh.bounding_box.extent.y))
                     distance -= vehicle_len
 
-                    right_lane_dis = lane_center.get_right_lane().transform.location.distance(
-                        self.ego_vehicle.get_location())
-                    t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
                     if i == 0 or i == 3:
                         t = lane_center.lane_width + t
                     elif i == 2 or i == 5:
                         t = lane_center.lane_width - t
                     if distance < self.min_distance:
                         if i < 3:
-                            v_info = [0.001, rel_speed / max_speed, t]
+                            v_info = [0.001, rel_speed, t]
                         else:
-                            v_info = [-0.001, rel_speed / max_speed, t]
+                            v_info = [-0.001, -rel_speed, t]
                     else:
                         distance -= self.min_distance
                         if i < 3:
-                            v_info = [distance / (self.vehicle_proximity - self.min_distance), rel_speed / max_speed, t]
+                            v_info = [distance / (self.vehicle_proximity - self.min_distance), rel_speed, t]
                         else:
-                            v_info = [-distance / (self.vehicle_proximity - self.min_distance), rel_speed / max_speed, t]
+                            v_info = [-distance / (self.vehicle_proximity - self.min_distance), -rel_speed, t]
             all_v_info.append(v_info)
         # print(all_v_info)
         return np.array(all_v_info)
+
+    def get_ego_lane(self):
+        lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
+        return lane_center.lane_id
 
     def _get_state(self, dict):
         """return a tuple: the first element is next waypoints, the second element is vehicle_front information"""
@@ -889,7 +906,7 @@ class CarlaEnv:
             else:
                 return - self.penalty
         else:
-            return fTTC + fEff * 2 + fCom + fLcen + impact + lane_changing_reward
+            return fTTC + fEff + fCom + fLcen + impact + lane_changing_reward
 
     def get_acc_s(self, acc, yaw_forward):
         acc.z = 0
