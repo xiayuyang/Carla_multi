@@ -24,6 +24,8 @@ class ReplayBuffer:
         reward_eff = info["velocity"]
         if reward_ttc < -0.1 or reward_eff < 3:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
+        if truncated:
+            self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         if action == 0 or action == 2:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         self.tmp_buffer.append((state, action, action_param, reward, next_state, truncated, done))

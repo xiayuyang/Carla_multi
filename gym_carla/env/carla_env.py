@@ -774,7 +774,7 @@ class CarlaEnv:
                 reward = min((right_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
             else:
                 reward = max((right_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
-                reward = 0
+                # reward = 0
             rear_ttc_reward = self.calculate_rear_ttc_reward()
             reward = reward + rear_ttc_reward
             print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
@@ -786,12 +786,12 @@ class CarlaEnv:
                 reward = min((left_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
             else:
                 reward = max((left_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
-                reward = 0
+                # reward = 0
             rear_ttc_reward = self.calculate_rear_ttc_reward()
             reward = reward + rear_ttc_reward
             print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
         if current_action == 0:
-            # if change lane in lane following mode
+            # if change lane in lane following mode, we set this reward=0, but will be truncated
             reward = 0
         return reward
 
@@ -838,7 +838,7 @@ class CarlaEnv:
             theta_v = math.acos(0)
             # alpha_v=math.acos(0)
         v_s = v_3d.length() * math.cos(theta_v)
-        if v_s*3.6 > self.speed_limit:
+        if v_s * 3.6 > self.speed_limit:
             # fEff = 1
             fEff = math.exp(self.speed_limit - v_s * 3.6) - 1
         else:
