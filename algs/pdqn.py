@@ -248,7 +248,7 @@ class P_DQN:
                             state_right_wps, state_veh_right_front, state_veh_right_rear, state_ev), dim=1)
         # print(state_.shape)
         all_action_param = self.actor(state_)
-        q_a = self.critic(state_, all_action_param).unsqueeze(0)
+        q_a = torch.squeeze(self.critic(state_, all_action_param))
         q_a = q_a.detach().cpu().numpy()
         if lane_id == -3:
             q_a[2] = -1000000.0
