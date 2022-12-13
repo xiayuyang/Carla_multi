@@ -143,11 +143,11 @@ ARGS.add_argument(
     help='reward for lane change according to the distance to the preceding vehicle')
 ARGS.add_argument(
     '--speed_limit', type=float,
-    default=72.0,
+    default=96.0,
     help='Speed limit for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_threshold', type=float,
-    default=36.0,
+    default=20.0,
     help='Speed threshold for ego vehicle, start phase for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_min', type=float,

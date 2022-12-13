@@ -388,7 +388,6 @@ def get_trafficlight_trigger_location(traffic_light):
     """
     Calculates the yaw of the waypoint that represents the trigger volume of the traffic light
     """
-
     def rotate_point(point, radians):
         """
         rotate a given point by a given angle

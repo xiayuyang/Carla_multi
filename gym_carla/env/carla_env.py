@@ -8,7 +8,8 @@ from enum import Enum
 from queue import Queue
 #from gym_carla.env.agent.basic_agent import BasicAgent
 from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
-    compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects,get_yaw_diff
+    compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
+    get_trafficlight_trigger_location
 from gym_carla.env.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
 from gym_carla.env.agent.route_planner import GlobalPlanner, LocalPlanner
 from gym_carla.env.agent.pid_controller import VehiclePIDController
@@ -33,7 +34,8 @@ class SpeedState(Enum):
 
 
 class CarlaEnv:
-    def __init__(self, args, train_pdqn=False, modify_change_steer=False, remove_lane_center_in_change=False) -> None:
+    def __init__(self, args, train_pdqn=False, modify_change_steer=False, remove_lane_center_in_change=False,
+                 add_traffic_light=False) -> None:
         super().__init__()
         self.host = args.host
         self.port = args.port
@@ -164,6 +166,13 @@ class CarlaEnv:
         # thread blocker
         self.sensor_queue = Queue(maxsize=10)
         self.camera = None
+        self.print_traffic_light_info()
+
+
+    def print_traffic_light_info(self):
+        actor_list = self.world.get_actors()
+        lights_list = actor_list.filter("*traffic_light*")
+
 
     def __del__(self):
         logging.info('\n Destroying all vehicles')
@@ -259,7 +268,7 @@ class CarlaEnv:
                                                         'max_brake': self.brake_bound})
         # self.control_sigma={'Steer':random.choice([0.3, 0.4, 0.5]),
         #                 'Throttle_brake':random.choice([0.4,0.5,0.6])}
-        self.control_sigma = {'Steer': random.choice([0, 0.05, 0.1, 0.15]),
+        self.control_sigma = {'Steer': random.choice([0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]),
                             'Throttle_brake': random.choice([0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4])}
         # self.control_sigma={'Steer': random.choice([0,0]),
         #                     'Throttle_brake': random.choice([0,0])}
@@ -768,7 +777,7 @@ class CarlaEnv:
         center_front_dis = distance_to_front_vehicles[1]
         if current_lane - last_lane == -1:
             # change right
-            # self.calculate_impact = True
+            self.calculate_impact = True
             right_front_dis = distance_to_front_vehicles[2]
             if right_front_dis > center_front_dis:
                 reward = min((right_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
@@ -776,11 +785,11 @@ class CarlaEnv:
                 reward = max((right_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
                 # reward = 0
             rear_ttc_reward = self.calculate_rear_ttc_reward()
-            reward = reward + rear_ttc_reward
+            reward = reward
             print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
         elif current_lane - last_lane == 1:
             # change left
-            # self.calculate_impact = True
+            self.calculate_impact = True
             left_front_dis = distance_to_front_vehicles[0]
             if left_front_dis > center_front_dis:
                 reward = min((left_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
@@ -788,7 +797,7 @@ class CarlaEnv:
                 reward = max((left_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
                 # reward = 0
             rear_ttc_reward = self.calculate_rear_ttc_reward()
-            reward = reward + rear_ttc_reward
+            reward = reward
             print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
         if current_action == 0:
             # if change lane in lane following mode, we set this reward=0, but will be truncated
@@ -902,11 +911,11 @@ class CarlaEnv:
                 else:
                     # If ego vehicle collides with traffic lights and stop signs, do not add penalty
                     self.step_info['Abandon'] = True
-                    return fTTC + fEff + fCom + fLcen + impact + lane_changing_reward
+                    return fEff + fCom + fLcen + impact + lane_changing_reward
             else:
                 return - self.penalty
         else:
-            return fTTC + fEff + fCom + fLcen + impact + lane_changing_reward
+            return fEff + fCom + fLcen + impact + lane_changing_reward
 
     def get_acc_s(self, acc, yaw_forward):
         acc.z = 0
@@ -1098,7 +1107,7 @@ class CarlaEnv:
         if self.map.get_waypoint(self.ego_vehicle.get_location()) is None:
             logging.warn('vehicle drive out of road')
             return True
-        if get_speed(self.ego_vehicle, False) < 0.1 and self.speed_state != SpeedState.START:
+        if get_speed(self.ego_vehicle, False) < 1 and self.speed_state != SpeedState.START:
             logging.warn('vehicle speed too low')
             return True
         # if self.lane_invasion_sensor.get_invasion_count()!=0:
@@ -1320,7 +1329,7 @@ class CarlaEnv:
                 self.traffic_manager.ignore_lights_percentage(
                     self.world.get_actor(response.actor_id), 100)
                 self.traffic_manager.auto_lane_change(
-                    self.world.get_actor(response.actor_id), True)
+                    self.world.get_actor(response.actor_id), False)
                 # modify change probability
                 # self.traffic_manager.random_left_lanechange_percentage(
                 #     self.world.get_actor(response.actor_id), 10)

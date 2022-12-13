@@ -34,7 +34,8 @@ zero_index_gradients = True
 inverting_gradients = False
 train_pdqn = True
 modify_change_steer = True
-action_mask = True
+action_mask = False
+add_traffic_light = False
 remove_lane_center_in_change = False
 base_name = f'origin_{TTC_threshold}_NOCA'
 
@@ -46,7 +47,8 @@ def main():
     logging.basicConfig(format='%(levelname)s: %(message)s', level=log_level)
 
     # env=gym.make('CarlaEnv-v0')
-    env = CarlaEnv(args, train_pdqn=train_pdqn, modify_change_steer=modify_change_steer, remove_lane_center_in_change=remove_lane_center_in_change)
+    env = CarlaEnv(args, train_pdqn=train_pdqn, modify_change_steer=modify_change_steer,
+                   remove_lane_center_in_change=remove_lane_center_in_change, add_traffic_light=False)
 
     done = False
     truncated = False
@@ -113,21 +115,21 @@ def main():
                                 #     # not work
                                 #     # Input the agent action to replay buffer
                                 #     agent.replay_buffer.add(state, action, all_action_param, reward, next_state, truncated, done, info)
-                                # print(f"state -- vehicle_info:{state['vehicle_info']}\n"
-                                #       f"waypoints:{state['left_waypoints']}, \n"
-                                #       f"waypoints:{state['center_waypoints']}, \n"
-                                #       f"waypoints:{state['right_waypoints']}, \n"
-                                #       f"ego_vehicle:{state['ego_vehicle']}, \n"
-                                #       f"next_state -- vehicle_info:{next_state['vehicle_info']}\n"
-                                #       f"waypoints:{next_state['left_waypoints']}, \n"
-                                #       f"waypoints:{next_state['center_waypoints']}, \n"
-                                #       f"waypoints:{next_state['right_waypoints']}, \n"
-                                #       f"ego_vehicle:{next_state['ego_vehicle']}\n"
-                                #       f"action:{action}\n"
-                                #       f"action_param:{action_param}\n"
-                                #       f"all_action_param:{all_action_param}\n"
-                                #       f"reward:{reward}\n"
-                                #       f"truncated:{truncated}, done:{done}")
+                                print(f"state -- vehicle_info:{state['vehicle_info']}\n"
+                                      f"waypoints:{state['left_waypoints']}, \n"
+                                      f"waypoints:{state['center_waypoints']}, \n"
+                                      f"waypoints:{state['right_waypoints']}, \n"
+                                      f"ego_vehicle:{state['ego_vehicle']}, \n"
+                                      f"next_state -- vehicle_info:{next_state['vehicle_info']}\n"
+                                      f"waypoints:{next_state['left_waypoints']}, \n"
+                                      f"waypoints:{next_state['center_waypoints']}, \n"
+                                      f"waypoints:{next_state['right_waypoints']}, \n"
+                                      f"ego_vehicle:{next_state['ego_vehicle']}\n"
+                                      f"action:{action}\n"
+                                      f"action_param:{action_param}\n"
+                                      f"all_action_param:{all_action_param}\n"
+                                      f"reward:{reward}\n"
+                                      f"truncated:{truncated}, done:{done}")
                                 print()
 
                             if agent.replay_buffer.size() > MINIMAL_SIZE:
@@ -146,7 +148,7 @@ def main():
                                 agent.save_net('./out/ddpg_pre_trained.pth')
                             # TODO: modify rl_control_step
                             if env.rl_control_step > 10000 and env.is_effective_action() and \
-                                    env.RL_switch and SIGMA > 0.01:
+                                    env.RL_switch and SIGMA_DECAY > 0.01 and SIGMA_ACC > 0.01:
                                 globals()['SIGMA'] *= SIGMA_DECAY
                                 globals()['SIGMA_STEER'] *= SIGMA_DECAY
                                 globals()['SIGMA_ACC'] *= SIGMA_DECAY

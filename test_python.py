@@ -53,9 +53,26 @@ import torch
 
 # a=[None for i in range(4)]
 # print(a)
-a=0.5
-for i in range(20000):
-    a=a*0.9999
-print(a)
+# a=0.5
+# for i in range(20000):
+#     a=a*0.9999
+# print(a)
 # a=abs(0.01)
 # print(a)
+import torch
+# a=torch.tensor(np.array([[1,2,3],[4,5,6]]), dtype=torch.float32)
+# b=torch.tensor(np.array([[0, 1]]), dtype=torch.int64)
+# c=torch.tensor(np.array([[0],[1]]), dtype=torch.int64)
+# print(a.gather(1, b), a.gather(1, c))
+# d = np.array([[0], [1]])
+# e = d[:, np.newaxis]
+# print(d, e)
+ind = torch.zeros(6, dtype=torch.long)
+ind[0:2] = 0
+ind[2:4] = 1
+ind[4:6] = 2
+ind_tile = ind.repeat(4, 1)
+a = torch.tensor(np.array([[1], [0], [2], [0]]), dtype=torch.int64)
+print(ind_tile != a)
+print(ind_tile)
+# actual_index = ind_tile != batch_action_indices

@@ -252,10 +252,11 @@ class P_DQN:
         all_action_param = self.actor(state_)
         q_a = torch.squeeze(self.critic(state_, all_action_param))
         q_a = q_a.detach().cpu().numpy()
-        if lane_id == -3:
-            q_a[2] = -1000000.0
-        elif lane_id == -1:
-            q_a[0] = -1000000.0
+        if action_mask:
+            if lane_id == -3:
+                q_a[2] = -1000000.0
+            elif lane_id == -1:
+                q_a[0] = -1000000.0
         action = np.argmax(q_a)
         action_param = all_action_param[:, self.action_parameter_offsets[action]:self.action_parameter_offsets[action+1]]
 
@@ -342,9 +343,9 @@ class P_DQN:
         batch_ns = torch.tensor(b_ns, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
         batch_a = torch.tensor(b_a, dtype=torch.int64).view((self.batch_size, -1)).to(self.device)
         batch_a_param = torch.tensor(b_a_param, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
-        batch_r = torch.tensor(b_r, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
-        batch_d = torch.tensor(b_d, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
-        batch_t = torch.tensor(b_t, dtype=torch.float32).view((self.batch_size, -1)).to(self.device)
+        batch_r = torch.tensor(b_r, dtype=torch.float32).view((self.batch_size, -1)).to(self.device).squeeze()
+        batch_d = torch.tensor(b_d, dtype=torch.float32).view((self.batch_size, -1)).to(self.device).squeeze()
+        batch_t = torch.tensor(b_t, dtype=torch.float32).view((self.batch_size, -1)).to(self.device).squeeze()
 
         with torch.no_grad():
             action_param_target = self.actor_target(batch_ns)
@@ -353,7 +354,7 @@ class P_DQN:
             q_targets = batch_r + self.gamma * q_prime * (1 - batch_t)
 
         q_values = self.critic(batch_s, batch_a_param)
-        q = q_values.gather(1, batch_a).squeeze()
+        q = q_values.gather(1, batch_a.view(-1, 1)).squeeze()
         loss_q = self.loss(q, q_targets)
 
         self.critic_optimizer.zero_grad()
@@ -368,7 +369,7 @@ class P_DQN:
         Q = self.critic(batch_s, action_param)
         Q_val = Q
         if self.indexd:
-            Q_indexed = Q_val.gather(1, batch_a)
+            Q_indexed = Q_val.gather(1, batch_a.view(-1, 1))
             Q_loss = torch.mean(Q_indexed)
         else:
             Q_loss = torch.mean(torch.sum(Q_val, 1))
