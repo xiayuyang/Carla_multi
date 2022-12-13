@@ -195,7 +195,7 @@ class CarlaEnv:
 
         # Spawn surrounding vehicles
         self._spawn_companion_vehicles()
-        self.calculate_impact = False
+        self.calculate_impact = 0
         self.rear_vel_deque.append(-1)
         self.rear_vel_deque.append(-1)
         # Get actors polygon list
@@ -495,10 +495,20 @@ class CarlaEnv:
 
             if self.ego_vehicle.get_location().distance(self.former_wp.transform.location) >= self.sampling_resolution:
                 self.former_wp = self.next_wps[0]
-            if self.vehicle_inlane[4] is not None:
-                self.rear_vel_deque.append(get_speed(self.vehicle_inlane[4], False))
+            temp = []
+            if self.vehicle_inlane[3] is not None:
+                temp.append(get_speed(self.vehicle_inlane[3], False))
             else:
-                self.rear_vel_deque.append(-1)
+                temp.append(-1)
+            if self.vehicle_inlane[4] is not None:
+                temp.append(get_speed(self.vehicle_inlane[4], False))
+            else:
+                temp.append(-1)
+            if self.vehicle_inlane[5] is not None:
+                temp.append(get_speed(self.vehicle_inlane[5], False))
+            else:
+                temp.append(-1)
+            self.rear_vel_deque.append(temp)
             """Attention: The sequence of following code is pivotal, do not recklessly change their execution order"""
             reward = self._get_reward(self.last_action, self.last_lane, self.current_lane, self.distance_to_front_vehicles, self.distance_to_rear_vehicles)
             state = self._get_state({'state_waypoints': self.state_waypoints, 'vehicle_inlane': self.vehicle_inlane})
@@ -777,7 +787,7 @@ class CarlaEnv:
         center_front_dis = distance_to_front_vehicles[1]
         if current_lane - last_lane == -1:
             # change right
-            self.calculate_impact = True
+            self.calculate_impact = 1
             right_front_dis = distance_to_front_vehicles[2]
             if right_front_dis > center_front_dis:
                 reward = min((right_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
@@ -789,7 +799,7 @@ class CarlaEnv:
             print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
         elif current_lane - last_lane == 1:
             # change left
-            self.calculate_impact = True
+            self.calculate_impact = -1
             left_front_dis = distance_to_front_vehicles[0]
             if left_front_dis > center_front_dis:
                 reward = min((left_front_dis / center_front_dis - 1) * self.lane_change_reward, self.lane_change_reward)
@@ -881,15 +891,15 @@ class CarlaEnv:
         fYaw = -abs(yaw_diff) / 90
 
         impact = 0
-        if self.calculate_impact:
-            last_rear_vel = self.rear_vel_deque[0]
-            current_rear_vel = self.rear_vel_deque[1]
+        if self.calculate_impact != 0:
+            last_rear_vel = self.rear_vel_deque[0][1]
+            current_rear_vel = self.rear_vel_deque[1][1]
             if last_rear_vel == -1 or current_rear_vel == -1:
                 impact = 0
             else:
                 if current_rear_vel < last_rear_vel:
-                    impact = (current_rear_vel - last_rear_vel) / (9 * 0.1)
-            self.calculate_impact = False
+                    impact = (current_rear_vel - last_rear_vel) * self.fps
+            self.calculate_impact = 0
 
         # reward for lane_changing
         lane_changing_reward = self.calculate_lane_change_reward(last_action, last_lane, current_lane, self.new_action,
@@ -898,9 +908,9 @@ class CarlaEnv:
         change_in_lane_follow = self.new_action == 0 and current_lane != last_lane
 
         self.step_info = {'velocity': v_s, 'offlane': Lcen, 'yaw_diff': yaw_diff, 'TTC': fTTC, 'Comfort': fCom,
-                          'Efficiency': fEff, 'Lane_center': fLcen, 'Yaw': fYaw, 'last_acc': self.last_acc, 'cur_acc': cur_acc,
-                          'yaw_change': yaw_change, 't': t,
-                          'lane_changing_reward': lane_changing_reward, 'impact': impact, 'change_in_lane_follow': change_in_lane_follow, 'Abandon': False}
+                          'Efficiency': fEff, 'Lane_center': fLcen, 'Yaw': fYaw, 'last_acc': self.last_acc,
+                          'cur_acc': cur_acc, 'yaw_change': yaw_change, 't': t, 'lane_changing_reward': lane_changing_reward,
+                          'impact': impact, 'change_in_lane_follow': change_in_lane_follow, 'Abandon': False}
 
         print('reward_info: ', self.step_info)
         if self._truncated():

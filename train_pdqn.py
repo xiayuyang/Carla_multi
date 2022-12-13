@@ -9,6 +9,7 @@ from gym_carla.env.settings import ARGS
 from gym_carla.env.carla_env import CarlaEnv
 from process import start_process, kill_process
 from gym_carla.env.util.misc import fill_action_param
+from collections import deque
 
 # neural network hyper parameters
 SIGMA = 0.5
@@ -88,7 +89,7 @@ def main():
                         agent.reset_noise()
                         score = 0
                         score_s, score_e, score_c = 0, 0, 0  # part objective scores
-
+                        impact_deque = deque(maxlen=2)
                         while not done and not truncated:
                             lane_id = env.get_ego_lane()
                             action, action_param, all_action_param = agent.take_action(state, lane_id=lane_id, action_mask=action_mask)
@@ -96,10 +97,18 @@ def main():
                             if env.is_effective_action() and not info['Abandon']:
                                 if 'Throttle' in info:
                                     control_state = info['control_state']
+                                    impact = info['impact']
                                     if control_state:
                                         # under rl control
-                                        agent.replay_buffer.add(state, action, all_action_param, reward, next_state,
-                                                                truncated, done, info)
+                                        impact_deque.append([state, action, all_action_param, reward, next_state,
+                                                                truncated, done, info])
+                                        if len(impact_deque) == 2:
+                                            experience = impact_deque[0]
+                                            agent.replay_buffer.add(experience[0], experience[1], experience[2],
+                                                                    experience[3] + impact, experience[4], experience[5],
+                                                                    experience[6], experience[7], experience[8])
+                                        # agent.replay_buffer.add(state, action, all_action_param, reward, next_state,
+                                        #                         truncated, done, info)
                                         print('rl control in replay buffer: ', action, all_action_param)
                                     else:
                                         # Input the guided action to replay buffer
@@ -109,8 +118,15 @@ def main():
                                         saved_action_param = fill_action_param(action, info['Steer'], throttle_brake,
                                                                                all_action_param, modify_change_steer)
                                         print('agent control in replay buffer: ', action, saved_action_param)
-                                        agent.replay_buffer.add(state, action, saved_action_param, reward, next_state,
-                                                                truncated, done, info)
+                                        impact_deque.append([state, action, saved_action_param, reward, next_state,
+                                                                truncated, done, info])
+                                        if len(impact_deque) == 2:
+                                            experience = impact_deque[0]
+                                            agent.replay_buffer.add(experience[0], experience[1], experience[2],
+                                                                    experience[3] + impact, experience[4], experience[5],
+                                                                    experience[6], experience[7], experience[8])
+                                        # agent.replay_buffer.add(state, action, saved_action_param, reward, next_state,
+                                        #                         truncated, done, info)
                                 # else:
                                 #     # not work
                                 #     # Input the agent action to replay buffer
