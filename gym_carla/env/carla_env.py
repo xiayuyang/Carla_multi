@@ -9,7 +9,7 @@ from queue import Queue
 #from gym_carla.env.agent.basic_agent import BasicAgent
 from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
     compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
-    get_trafficlight_trigger_location
+    get_trafficlight_trigger_location, is_within_distance
 from gym_carla.env.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
 from gym_carla.env.agent.route_planner import GlobalPlanner, LocalPlanner
 from gym_carla.env.agent.pid_controller import VehiclePIDController
@@ -35,7 +35,7 @@ class SpeedState(Enum):
 
 class CarlaEnv:
     def __init__(self, args, train_pdqn=False, modify_change_steer=False, remove_lane_center_in_change=False,
-                 add_traffic_light=False) -> None:
+                 ignore_traffic_light=False) -> None:
         super().__init__()
         self.host = args.host
         self.port = args.port
@@ -71,6 +71,7 @@ class CarlaEnv:
         self.train_pdqn = train_pdqn
         self.modify_change_steer = modify_change_steer
         self.remove_lane_center_in_change = remove_lane_center_in_change
+        self.ignore_traffic_light = ignore_traffic_light
 
         logging.info('listening to server %s:%s', args.host, args.port)
         self.client = carla.Client(self.host, self.port)
@@ -166,12 +167,33 @@ class CarlaEnv:
         # thread blocker
         self.sensor_queue = Queue(maxsize=10)
         self.camera = None
-        self.print_traffic_light_info()
+        # self.print_traffic_light_info()
 
 
     def print_traffic_light_info(self):
         actor_list = self.world.get_actors()
         lights_list = actor_list.filter("*traffic_light*")
+        # lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
+        for traffic_light in lights_list:
+            object_location = get_trafficlight_trigger_location(traffic_light)
+            object_waypoint = self.map.get_waypoint(object_location)
+            print(traffic_light, object_location, object_waypoint, object_waypoint.road_id)
+            # if object_waypoint.road_id != lane_center.road_id:
+            #     continue
+            #
+            # ve_dir = lane_center.transform.get_forward_vector()
+            # wp_dir = object_waypoint.transform.get_forward_vector()
+            # dot_ve_wp = ve_dir.x * wp_dir.x + ve_dir.y * wp_dir.y + ve_dir.z * wp_dir.z
+            #
+            # if dot_ve_wp < 0:
+            #     continue
+            #
+            # if traffic_light.state != carla.TrafficLightState.Red:
+            #     continue
+            #
+            # if is_within_distance(object_waypoint.transform, self._vehicle.get_transform(), 20, [0, 90]):
+            #     self._last_traffic_light = traffic_light
+            #     return (True, traffic_light)
 
 
     def __del__(self):
@@ -273,7 +295,7 @@ class CarlaEnv:
         # self.control_sigma={'Steer': random.choice([0,0]),
         #                     'Throttle_brake': random.choice([0,0])}
 
-        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, target_speed=50, opt_dict={'ignore_traffic_lights': True,
+        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, target_speed=50, opt_dict={'ignore_traffic_lights': self.ignore_traffic_light,
                                     'ignore_stop_signs': True, 'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
                                     'sampling_radius': self.sampling_resolution, 'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,
                                     'max_brake': self.brake_bound, 'buffer_size': self.buffer_size, 'ignore_front_vehicle': random.choice([True, False]),
@@ -795,6 +817,7 @@ class CarlaEnv:
                 reward = max((right_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
                 # reward = 0
             rear_ttc_reward = self.calculate_rear_ttc_reward()
+            # add rear_ttc_reward?
             reward = reward
             print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
         elif current_lane - last_lane == 1:
@@ -809,7 +832,7 @@ class CarlaEnv:
             rear_ttc_reward = self.calculate_rear_ttc_reward()
             reward = reward
             print('lane change reward and real ttc reward: ', reward, rear_ttc_reward)
-        if current_action == 0:
+        if current_action == 0 and self.train_pdqn:
             # if change lane in lane following mode, we set this reward=0, but will be truncated
             reward = 0
         return reward
@@ -1117,7 +1140,7 @@ class CarlaEnv:
         if self.map.get_waypoint(self.ego_vehicle.get_location()) is None:
             logging.warn('vehicle drive out of road')
             return True
-        if get_speed(self.ego_vehicle, False) < 1 and self.speed_state != SpeedState.START:
+        if get_speed(self.ego_vehicle, False) < self.speed_min and self.speed_state != SpeedState.START and self.rl_control_step < 100000:
             logging.warn('vehicle speed too low')
             return True
         # if self.lane_invasion_sensor.get_invasion_count()!=0:
@@ -1164,7 +1187,8 @@ class CarlaEnv:
         if setting:
             speed_diff = (30 - self.speed_limit) / 30 * 100
             self.traffic_manager.distance_to_leading_vehicle(self.ego_vehicle, self.min_distance)
-            self.traffic_manager.ignore_lights_percentage(self.ego_vehicle, 100)
+            if self.ignore_traffic_light:
+                self.traffic_manager.ignore_lights_percentage(self.ego_vehicle, 100)
             self.traffic_manager.ignore_signs_percentage(self.ego_vehicle, 100)
             self.traffic_manager.ignore_vehicles_percentage(self.ego_vehicle, 0)
             self.traffic_manager.ignore_walkers_percentage(self.ego_vehicle, 100)
@@ -1336,8 +1360,9 @@ class CarlaEnv:
             else:
                 # print("Future Actor",response.actor_id)
                 self.companion_vehicles.append(self.world.get_actor(response.actor_id))
-                self.traffic_manager.ignore_lights_percentage(
-                    self.world.get_actor(response.actor_id), 100)
+                if self.ignore_traffic_light:
+                    self.traffic_manager.ignore_lights_percentage(
+                        self.world.get_actor(response.actor_id), 100)
                 self.traffic_manager.auto_lane_change(
                     self.world.get_actor(response.actor_id), False)
                 # modify change probability
