@@ -36,7 +36,7 @@ inverting_gradients = False
 train_pdqn = True
 modify_change_steer = True
 action_mask = False
-add_traffic_light = False
+ignore_traffic_light = True
 remove_lane_center_in_change = False
 base_name = f'origin_{TTC_threshold}_NOCA'
 
@@ -49,7 +49,7 @@ def main():
 
     # env=gym.make('CarlaEnv-v0')
     env = CarlaEnv(args, train_pdqn=train_pdqn, modify_change_steer=modify_change_steer,
-                   remove_lane_center_in_change=remove_lane_center_in_change, add_traffic_light=False)
+                   remove_lane_center_in_change=remove_lane_center_in_change, ignore_traffic_light=ignore_traffic_light)
 
     done = False
     truncated = False
@@ -97,7 +97,7 @@ def main():
                             if env.is_effective_action() and not info['Abandon']:
                                 if 'Throttle' in info:
                                     control_state = info['control_state']
-                                    impact = info['impact']
+                                    impact = info['impact'] / 3
                                     if control_state:
                                         # under rl control
                                         impact_deque.append([state, action, all_action_param, reward, next_state,
@@ -106,7 +106,7 @@ def main():
                                             experience = impact_deque[0]
                                             agent.replay_buffer.add(experience[0], experience[1], experience[2],
                                                                     experience[3] + impact, experience[4], experience[5],
-                                                                    experience[6], experience[7], experience[8])
+                                                                    experience[6], experience[7])
                                         # agent.replay_buffer.add(state, action, all_action_param, reward, next_state,
                                         #                         truncated, done, info)
                                         print('rl control in replay buffer: ', action, all_action_param)
@@ -124,7 +124,7 @@ def main():
                                             experience = impact_deque[0]
                                             agent.replay_buffer.add(experience[0], experience[1], experience[2],
                                                                     experience[3] + impact, experience[4], experience[5],
-                                                                    experience[6], experience[7], experience[8])
+                                                                    experience[6], experience[7])
                                         # agent.replay_buffer.add(state, action, saved_action_param, reward, next_state,
                                         #                         truncated, done, info)
                                 # else:
@@ -164,7 +164,7 @@ def main():
                                 agent.save_net('./out/ddpg_pre_trained.pth')
                             # TODO: modify rl_control_step
                             if env.rl_control_step > 10000 and env.is_effective_action() and \
-                                    env.RL_switch and SIGMA_DECAY > 0.01 and SIGMA_ACC > 0.01:
+                                    env.RL_switch:
                                 globals()['SIGMA'] *= SIGMA_DECAY
                                 globals()['SIGMA_STEER'] *= SIGMA_DECAY
                                 globals()['SIGMA_ACC'] *= SIGMA_DECAY

@@ -143,7 +143,7 @@ ARGS.add_argument(
     help='reward for lane change according to the distance to the preceding vehicle')
 ARGS.add_argument(
     '--speed_limit', type=float,
-    default=96.0,
+    default=90.0,
     help='Speed limit for ego vehicle, km/h')
 ARGS.add_argument(
     '--speed_threshold', type=float,
@@ -177,7 +177,7 @@ ARGS.add_argument(
     help='Let the RL controller and PID controller alternatively take control every 500 steps'
 )
 ARGS.add_argument(
-    '--vehicle_proximity',type=float,
+    '--vehicle_proximity', type=float,
     default=50.0,
     help='Distance for searching vehicles in front of ego vehicle, unit -- meters'
 )
