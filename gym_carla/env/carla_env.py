@@ -655,6 +655,10 @@ class CarlaEnv:
         print('vehicle_inlane: ', vehicle_inlane)
         for i in range(6):
             t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
+            if i == 0 or i == 3:
+                t = lane_center.lane_width + t
+            elif i == 2 or i == 5:
+                t = lane_center.lane_width - t
             veh = vehicle_inlane[i]
             wall = False
             if left_wall and (i == 0 or i == 3):
@@ -681,10 +685,6 @@ class CarlaEnv:
                         max(abs(veh.bounding_box.extent.x), abs(veh.bounding_box.extent.y))
                     distance -= vehicle_len
 
-                    if i == 0 or i == 3:
-                        t = lane_center.lane_width + t
-                    elif i == 2 or i == 5:
-                        t = lane_center.lane_width - t
                     if distance < 0:
                         if i < 3:
                             v_info = [0.001, rel_speed, t]
