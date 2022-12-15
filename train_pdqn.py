@@ -97,7 +97,7 @@ def main():
                             if env.is_effective_action() and not info['Abandon']:
                                 if 'Throttle' in info:
                                     control_state = info['control_state']
-                                    impact = info['impact'] / 3
+                                    impact = info['impact'] / 9
                                     if control_state:
                                         # under rl control
                                         impact_deque.append([state, action, all_action_param, reward, next_state,

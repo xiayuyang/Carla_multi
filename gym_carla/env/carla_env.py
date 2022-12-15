@@ -9,7 +9,7 @@ from queue import Queue
 #from gym_carla.env.agent.basic_agent import BasicAgent
 from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
     compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
-    get_trafficlight_trigger_location, is_within_distance,get_sign
+    get_trafficlight_trigger_location, is_within_distance, get_sign
 from gym_carla.env.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
 from gym_carla.env.agent.route_planner import GlobalPlanner, LocalPlanner
 from gym_carla.env.agent.pid_controller import VehiclePIDController
@@ -944,11 +944,11 @@ class CarlaEnv:
                 else:
                     # If ego vehicle collides with traffic lights and stop signs, do not add penalty
                     self.step_info['Abandon'] = True
-                    return (fTTC+fEff)*2 + fCom + fLcen + impact + lane_changing_reward
+                    return fTTC+fEff + (fCom + fLcen) * 0.5 + lane_changing_reward
             else:
                 return - self.penalty
         else:
-            return (fTTC+fEff)*2 + fCom + fLcen + impact + lane_changing_reward
+            return fTTC+fEff + (fCom + fLcen) * 0.5 + lane_changing_reward
 
     def get_acc_s(self, acc, yaw_forward):
         acc.z = 0
@@ -976,23 +976,23 @@ class CarlaEnv:
                   lane_center.road_id, fLcen, lane_center.lane_width / 2)
         else:
             if action == -1 and self.current_lane == self.last_lane:
-                #change left
+                # change left
                 lane_center=lane_center.get_left_lane()
-                if not test_waypoint(lane_center, True):
+                if lane_center is None or not test_waypoint(lane_center, True):
                     Lcen = 7
                     fLcen = -2
                 else:
                     Lcen =compute(lane_center,ego_location)
-                    fLcen = -abs(Lcen) / (lane_center.lane_width/2)
+                    fLcen = -abs(Lcen) / lane_center.lane_width
             elif action == 1 and self.current_lane == self.last_lane:
                 #change right
                 lane_center=lane_center.get_right_lane()
-                if not test_waypoint(lane_center,True):
+                if lane_center is None or not test_waypoint(lane_center,True):
                     Lcen = 7
                     fLcen = -2
                 else:
                     Lcen =compute(lane_center,ego_location)
-                    fLcen=-abs(Lcen)/(lane_center.lane_width/2)
+                    fLcen=-abs(Lcen)/lane_center.lane_width
             else:
                 #lane follow
                 Lcen =compute(lane_center,ego_location)
