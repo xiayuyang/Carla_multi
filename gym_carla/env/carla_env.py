@@ -11,7 +11,8 @@ from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration,
     compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
     get_trafficlight_trigger_location, is_within_distance, get_sign
 from gym_carla.env.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
-from gym_carla.env.agent.route_planner import GlobalPlanner, LocalPlanner
+from gym_carla.env.agent.local_planner import LocalPlanner
+from gym_carla.env.agent.global_planner import GlobalPlanner
 from gym_carla.env.agent.pid_controller import VehiclePIDController
 from gym_carla.env.carla.behavior_agent import BehaviorAgent, BasicAgent
 from gym_carla.env.carla.basic_lanechanging_agent import Basic_Lanechanging_Agent
@@ -34,8 +35,7 @@ class SpeedState(Enum):
 
 
 class CarlaEnv:
-    def __init__(self, args, train_pdqn=False, modify_change_steer=False, remove_lane_center_in_change=False,
-                 ignore_traffic_light=False) -> None:
+    def __init__(self, args, train_pdqn=False, modify_change_steer=False, remove_lane_center_in_change=False) -> None:
         super().__init__()
         self.host = args.host
         self.port = args.port
@@ -52,6 +52,7 @@ class CarlaEnv:
         self.sampling_resolution = args.sampling_resolution
         self.min_distance = args.min_distance
         self.vehicle_proximity = args.vehicle_proximity
+        self.traffic_light_proximity = args.traffic_light_proximity
         self.hybrid = args.hybrid
         self.auto_lanechange = args.auto_lane_change
         self.guide_change = args.guide_change
@@ -71,7 +72,7 @@ class CarlaEnv:
         self.train_pdqn = train_pdqn
         self.modify_change_steer = modify_change_steer
         self.remove_lane_center_in_change = remove_lane_center_in_change
-        self.ignore_traffic_light = ignore_traffic_light
+        self.ignore_traffic_light = args.ignore_traffic_light
 
         logging.info('listening to server %s:%s', args.host, args.port)
         self.client = carla.Client(self.host, self.port)
@@ -266,7 +267,8 @@ class CarlaEnv:
         # add route planner for ego vehicle
         self.local_planner = LocalPlanner(self.ego_vehicle, {'sampling_resolution': self.sampling_resolution,
                                                              'buffer_size': self.buffer_size,
-                                                             'vehicle_proximity': self.vehicle_proximity})
+                                                             'vehicle_proximity': self.vehicle_proximity,
+                                                             'traffic_light_proximity':self.traffic_light_proximity})
         # self.local_planner.set_global_plan(self.global_planner.get_route(
         #      self.map.get_waypoint(self.ego_vehicle.get_location())))
         self.current_lane = get_lane_center(self.map, self.ego_vehicle.get_location()).lane_id
@@ -275,7 +277,7 @@ class CarlaEnv:
         self.new_target_lane = self.current_lane
         print('current lane, target lane', self.current_lane, self.target_lane)
 
-        self.next_wps, o1, o2 = self.local_planner.run_step()
+        self.next_wps, red_light, o2 = self.local_planner.run_step()
         self.state_waypoints, self.draw_waypoints = self.local_planner._get_waypoints_multilane()
         self.left_wps, self.center_wps, self.right_wps, self.left_rear_wps, self.center_rear_wps, self.right_rear_wps = self.state_waypoints
         self.vehicle_front, self.vehicle_rear, self.vehicle_inlane = self.local_planner._get_front_rear_inlane_vehicle()
@@ -493,7 +495,8 @@ class CarlaEnv:
             # print(self.ego_vehicle.get_speed_limit(),get_speed(self.ego_vehicle,False),get_acceleration(self.ego_vehicle,False),sep='\t')
             # route planner
             # self.next_wps, _, self.vehicle_front = self.local_planner.run_step()
-            self.next_wps, o1, o2 = self.local_planner.run_step()
+            self.next_wps, red_light, o2 = self.local_planner.run_step()
+            print(f"Red Light: {red_light}")
             self.state_waypoints, self.draw_waypoints = self.local_planner._get_waypoints_multilane()
             self.left_wps, self.center_wps, self.right_wps, self.left_rear_wps, self.center_rear_wps, self.right_rear_wps = self.state_waypoints
             self.vehicle_front, self.vehicle_rear, self.vehicle_inlane = self.local_planner._get_front_rear_inlane_vehicle()
@@ -738,8 +741,10 @@ class CarlaEnv:
         right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
         if self.train_pdqn:
             t, fLcen = self.pdqn_lane_center(lane_center, self.ego_vehicle.get_location(), self.new_action)
+            ego_t= lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
         else:
             t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
+            ego_t=t
 
         ego_vehicle_z = lane_center.transform.location.z
         ego_forward_vector = self.ego_vehicle.get_transform().get_forward_vector()
@@ -801,7 +806,7 @@ class CarlaEnv:
         Upon initializing, there are some bugs in the theta_v and theta_a, which could be greater than 90,
         this might be caused by carla."""
         return {'left_waypoints': left_wps_processed, 'center_waypoints': center_wps_processed,
-                'right_waypoints': right_wps_processed, 'ego_vehicle': [v_s/10, v_t/10, a_s/3, a_t/3, t, yaw_diff_ego/90],
+                'right_waypoints': right_wps_processed, 'ego_vehicle': [v_s/10, v_t/10, a_s/3, a_t/3, ego_t, yaw_diff_ego/90],
                 'vehicle_info': vehicle_inlane_processed}
 
     def calculate_lane_change_reward(self, last_action, last_lane, current_lane, current_action, distance_to_front_vehicles, distance_to_rear_vehicles):
@@ -944,11 +949,11 @@ class CarlaEnv:
                 else:
                     # If ego vehicle collides with traffic lights and stop signs, do not add penalty
                     self.step_info['Abandon'] = True
-                    return fTTC+fEff + (fCom + fLcen) * 0.5 + lane_changing_reward
+                    return fTTC+fEff + fCom + fLcen + lane_changing_reward
             else:
                 return - self.penalty
         else:
-            return fTTC+fEff + (fCom + fLcen) * 0.5 + lane_changing_reward
+            return fTTC+fEff + fCom + fLcen + lane_changing_reward
 
     def get_acc_s(self, acc, yaw_forward):
         acc.z = 0

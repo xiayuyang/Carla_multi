@@ -49,7 +49,7 @@ def main():
 
     # env=gym.make('CarlaEnv-v0')
     env = CarlaEnv(args, train_pdqn=train_pdqn, modify_change_steer=modify_change_steer,
-                   remove_lane_center_in_change=remove_lane_center_in_change, ignore_traffic_light=ignore_traffic_light)
+                   remove_lane_center_in_change=remove_lane_center_in_change)
 
     done = False
     truncated = False

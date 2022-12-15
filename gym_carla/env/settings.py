@@ -1,7 +1,7 @@
 """This file defines all high level parameters of carla gym environment"""
 import argparse
 
-CARLA_PATH = 'D:\WindowsNoEditor'
+CARLA_PATH = 'D:\ProgramFiles\Carla\WindowsNoEditor'
 # the following road id sets define the chosen route
 ROADS = set()
 DISTURB_ROADS = set()
@@ -95,7 +95,7 @@ ARGS.add_argument(
 ARGS.add_argument(
     '-n', '--num_of_vehicles', type=list,
     help='Total vehicles number which run in simulation',
-    default=[10*3, 15*3, 20*3, 25*3])
+    default=[10*3, 15*3, 20*3, 25*3, 30*3,35*3])
 ARGS.add_argument(
     '-sa', '--sampling_resolution', type=float,
     help='Distance between generated two waypoints',
@@ -139,7 +139,7 @@ ARGS.add_argument(
     help='reward penalty for simulation terminated early on account of collision and lane invasion')
 ARGS.add_argument(
     '--lane_change_reward', type=float,
-    default=20,
+    default=10,
     help='reward for lane change according to the distance to the preceding vehicle')
 ARGS.add_argument(
     '--speed_limit', type=float,
@@ -182,6 +182,11 @@ ARGS.add_argument(
     help='Distance for searching vehicles in front of ego vehicle, unit -- meters'
 )
 ARGS.add_argument(
+    '--traffic_light_proximity', type=float,
+    default=50.0,
+    help='Distance for searching traffic light in front of ego vehicle, unit -- meters'
+)
+ARGS.add_argument(
     '--min_distance',type=float,
     default=2.0,
     help='Min distance between two vehicles, unit -- meters'
@@ -190,6 +195,10 @@ ARGS.add_argument(
     '--guide_change', type=bool,
     default=True,
     help='guide the vehicle to change via lane_center')
+ARGS.add_argument(
+    '--ignore_traffic_light', type=bool,
+    default=False,
+    help='Set the vehicles in simulation to ignore traffic lights or not')
 # ARGS.add_argument(
 #     '--modify_change_steer', type=bool,
 #     default=False,

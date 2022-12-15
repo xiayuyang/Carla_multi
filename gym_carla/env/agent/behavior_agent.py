@@ -4,7 +4,7 @@ from shapely.geometry import Polygon
 from gym_carla.env.util.misc import get_speed,positive
 from gym_carla.env.agent.basic_agent import BasicAgent
 from gym_carla.env.agent.behavior_types import Cautious,Normal,Aggressive
-from gym_carla.env.agent.route_planner import RoadOption
+from gym_carla.env.agent.local_planner import RoadOption
 
 class BehaviorAgent(BasicAgent):
     """
