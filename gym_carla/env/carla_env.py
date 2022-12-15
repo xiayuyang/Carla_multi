@@ -642,7 +642,7 @@ class CarlaEnv:
             yaw_diff = math.degrees(get_yaw_diff(wp.transform.get_forward_vector(), ego_forward_vector))
             yaw_diff = yaw_diff / 90
             if idx % my_sample_ratio == my_sample_ratio-1:
-                wps.append([delta_z/3, yaw_diff, final_t])
+                wps.append([delta_z/3, yaw_diff, flag])
             idx = idx + 1
         return np.array(wps)
 
@@ -653,15 +653,14 @@ class CarlaEnv:
         ego_bounding_y = self.ego_vehicle.bounding_box.extent.y
         max_speed = self.speed_limit
         all_v_info = []
-        right_lane_dis = lane_center.get_right_lane().transform.location.distance(
-            self.ego_vehicle.get_location())
         print('vehicle_inlane: ', vehicle_inlane)
         for i in range(6):
-            t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
             if i == 0 or i == 3:
-                t = lane_center.lane_width + t
-            elif i == 2 or i == 5:
-                t = lane_center.lane_width - t
+                lane = -1
+            elif i == 1 or i == 4:
+                lane = 0
+            else:
+                lane = 1
             veh = vehicle_inlane[i]
             wall = False
             if left_wall and (i == 0 or i == 3):
@@ -670,15 +669,15 @@ class CarlaEnv:
                 wall = True
             if wall:
                 if i < 3:
-                    v_info = [0.001, 0, t]
+                    v_info = [0.001, 0, lane]
                 else:
-                    v_info = [-0.001, 0, t]
+                    v_info = [-0.001, 0, lane]
             else:
                 if veh is None:
                     if i < 3:
-                        v_info = [1, 0, t]
+                        v_info = [1, 0, lane]
                     else:
-                        v_info = [-1, 0, t]
+                        v_info = [-1, 0, lane]
                 else:
                     veh_speed = get_speed(veh, False)
                     rel_speed = ego_speed - veh_speed
@@ -690,14 +689,14 @@ class CarlaEnv:
 
                     if distance < 0:
                         if i < 3:
-                            v_info = [0.001, rel_speed, t]
+                            v_info = [0.001, rel_speed, lane]
                         else:
-                            v_info = [-0.001, -rel_speed, t]
+                            v_info = [-0.001, -rel_speed, lane]
                     else:
                         if i < 3:
-                            v_info = [distance / self.vehicle_proximity, rel_speed, t]
+                            v_info = [distance / self.vehicle_proximity, rel_speed, lane]
                         else:
-                            v_info = [-distance / self.vehicle_proximity, -rel_speed, t]
+                            v_info = [-distance / self.vehicle_proximity, -rel_speed, lane]
             all_v_info.append(v_info)
         # print(all_v_info)
         return np.array(all_v_info)
@@ -752,10 +751,14 @@ class CarlaEnv:
         center_wps_processed = self.process_lane_wp(lane_width, center_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 0, t)
         if len(left_wps) == 0:
             left_wps_processed = center_wps_processed.copy()
+            for left_wp in left_wps_processed:
+                left_wp[2] = -1
         else:
             left_wps_processed = self.process_lane_wp(lane_width, left_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, -1, t)
         if len(right_wps) == 0:
             right_wps_processed = center_wps_processed.copy()
+            for right_wp in right_wps_processed:
+                right_wp[2] = 1
         else:
             right_wps_processed = self.process_lane_wp(lane_width, right_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 1, t)
 
