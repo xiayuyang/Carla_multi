@@ -652,9 +652,9 @@ class CarlaEnv:
         all_v_info = []
         right_lane_dis = lane_center.get_right_lane().transform.location.distance(
             self.ego_vehicle.get_location())
-        t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
         print('vehicle_inlane: ', vehicle_inlane)
         for i in range(6):
+            t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
             veh = vehicle_inlane[i]
             wall = False
             if left_wall and (i == 0 or i == 3):
@@ -685,17 +685,16 @@ class CarlaEnv:
                         t = lane_center.lane_width + t
                     elif i == 2 or i == 5:
                         t = lane_center.lane_width - t
-                    if distance < self.min_distance:
+                    if distance < 0:
                         if i < 3:
                             v_info = [0.001, rel_speed, t]
                         else:
                             v_info = [-0.001, -rel_speed, t]
                     else:
-                        distance -= self.min_distance
                         if i < 3:
-                            v_info = [distance / (self.vehicle_proximity - self.min_distance), rel_speed, t]
+                            v_info = [distance / self.vehicle_proximity, rel_speed, t]
                         else:
-                            v_info = [-distance / (self.vehicle_proximity - self.min_distance), -rel_speed, t]
+                            v_info = [-distance / self.vehicle_proximity, -rel_speed, t]
             all_v_info.append(v_info)
         # print(all_v_info)
         return np.array(all_v_info)
