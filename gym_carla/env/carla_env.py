@@ -944,11 +944,11 @@ class CarlaEnv:
                 else:
                     # If ego vehicle collides with traffic lights and stop signs, do not add penalty
                     self.step_info['Abandon'] = True
-                    return fEff + fCom + fLcen + impact + lane_changing_reward
+                    return (fTTC+fEff)*2 + fCom + fLcen + impact + lane_changing_reward
             else:
                 return - self.penalty
         else:
-            return fEff + fCom + fLcen + impact + lane_changing_reward
+            return (fTTC+fEff)*2 + fCom + fLcen + impact + lane_changing_reward
 
     def get_acc_s(self, acc, yaw_forward):
         acc.z = 0
