@@ -10,14 +10,14 @@ It can also make use of the global route planner to follow a specifed route
 """
 
 import carla
-from enum import Enum
-from collections import deque
 import random
 import numpy as np
+from enum import Enum
+from collections import deque
 from shapely.geometry import Polygon
 
 from gym_carla.env.util.misc import get_speed, draw_waypoints, is_within_distance, get_trafficlight_trigger_location, compute_distance, get_lane_center
-from gym_carla.env.carla.controller import VehiclePIDController
+from gym_carla.env.agent.pid_controller import VehiclePIDController
 
 FOLLOW = 0
 CHANGE_LEFT = -1

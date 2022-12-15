@@ -15,7 +15,7 @@ from gym_carla.env.agent.local_planner import LocalPlanner
 from gym_carla.env.agent.global_planner import GlobalPlanner
 from gym_carla.env.agent.pid_controller import VehiclePIDController
 from gym_carla.env.carla.behavior_agent import BehaviorAgent, BasicAgent
-from gym_carla.env.carla.basic_lanechanging_agent import Basic_Lanechanging_Agent
+from gym_carla.env.agent.basic_lanechanging_agent import Basic_Lanechanging_Agent
 from collections import deque
 FOLLOW = 0
 CHANGE_LEFT = -1
