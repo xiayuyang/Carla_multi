@@ -9,7 +9,7 @@ from queue import Queue
 #from gym_carla.env.agent.basic_agent import BasicAgent
 from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
     compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
-    get_trafficlight_trigger_location, is_within_distance
+    get_trafficlight_trigger_location, is_within_distance,get_sign
 from gym_carla.env.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
 from gym_carla.env.agent.route_planner import GlobalPlanner, LocalPlanner
 from gym_carla.env.agent.pid_controller import VehiclePIDController
@@ -736,7 +736,10 @@ class CarlaEnv:
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
         lane_width = lane_center.lane_width
         right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
-        t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
+        if self.train_pdqn:
+            t, fLcen = self.pdqn_lane_center(lane_center, self.ego_vehicle.get_location(), self.new_action)
+        else:
+            t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
 
         ego_vehicle_z = lane_center.transform.location.z
         ego_forward_vector = self.ego_vehicle.get_transform().get_forward_vector()
@@ -846,8 +849,6 @@ class CarlaEnv:
         ego_speed = get_speed(self.ego_vehicle, True)
         # print('7')
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
-        right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
-        t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
         TTC = float('inf')
         if self.vehicle_front:
             distance = self.ego_vehicle.get_location().distance(self.vehicle_front.get_location())
@@ -894,7 +895,7 @@ class CarlaEnv:
         # # whick still requires further testing, longitudinal and lateral
         # fCom = -jerk / ((6 * self.fps) ** 2 + (12 * self.fps) ** 2)
         if self.train_pdqn:
-            Lcen, fLcen = self.pdqn_lane_center(lane_center, self.ego_vehicle.get_location(), self.new_action, t)
+            Lcen, fLcen = self.pdqn_lane_center(lane_center, self.ego_vehicle.get_location(), self.new_action)
         else:
             if self.guide_change:
                 Lcen, fLcen = self.calculate_guide_lane_center(lane_center, self.ego_vehicle.get_location(), distance_to_front_vehicles, distance_to_rear_vehicles)
@@ -931,7 +932,7 @@ class CarlaEnv:
 
         self.step_info = {'velocity': v_s, 'offlane': Lcen, 'yaw_diff': yaw_diff, 'TTC': fTTC, 'Comfort': fCom,
                           'Efficiency': fEff, 'Lane_center': fLcen, 'Yaw': fYaw, 'last_acc': self.last_acc,
-                          'cur_acc': cur_acc, 'yaw_change': yaw_change, 't': t, 'lane_changing_reward': lane_changing_reward,
+                          'cur_acc': cur_acc, 'yaw_change': yaw_change, 'lane_changing_reward': lane_changing_reward,
                           'impact': impact, 'change_in_lane_follow': change_in_lane_follow, 'Abandon': False}
 
         print('reward_info: ', self.step_info)
@@ -943,11 +944,11 @@ class CarlaEnv:
                 else:
                     # If ego vehicle collides with traffic lights and stop signs, do not add penalty
                     self.step_info['Abandon'] = True
-                    return fEff + fCom + fLcen + impact + lane_changing_reward
+                    return (fTTC+fEff)*2 + fCom + fLcen + impact + lane_changing_reward
             else:
                 return - self.penalty
         else:
-            return fEff + fCom + fLcen + impact + lane_changing_reward
+            return (fTTC+fEff)*2 + fCom + fLcen + impact + lane_changing_reward
 
     def get_acc_s(self, acc, yaw_forward):
         acc.z = 0
@@ -959,24 +960,43 @@ class CarlaEnv:
         acc_s = acc.length() * math.cos(theta_acc)
         return acc_s
 
-    def pdqn_lane_center(self, lane_center, ego_location, action, t):
-        Lcen = lane_center.transform.location.distance(ego_location)
-        lane_wid = lane_center.lane_width
-        print('pdqn_lane_center: Lcen, lane_wid, t: ', Lcen, lane_wid, t)
-        if not test_waypoint(lane_center, True) or Lcen > lane_wid / 2 + 0.1:
+    def pdqn_lane_center(self, lane_center, ego_location, action):
+        def compute(center,ego):
+            Lcen=ego.distance(center.transform.location)
+            center_yaw=lane_center.transform.get_forward_vector()
+            dis=carla.Vector3D(ego.x-lane_center.transform.location.x,
+                ego.y-lane_center.transform.location.y,0)
+            Lcen*=get_sign(dis,center_yaw)
+            return Lcen
+
+        if not test_waypoint(lane_center, True):
+            Lcen = 7
             fLcen = -2
-            print('lane_center.lane_id, lane_center.roaf_id, lcen, flcen, lane_wid/2: ', lane_center.lane_id,
-                  lane_center.road_id, Lcen, fLcen, lane_wid / 2)
+            print('lane_center.lane_id, lane_center.road_id, flcen, lane_wid/2: ', lane_center.lane_id,
+                  lane_center.road_id, fLcen, lane_center.lane_width / 2)
         else:
             if action == -1 and self.current_lane == self.last_lane:
-                # change left
-                Lcen = lane_wid + t
-                fLcen = -Lcen / lane_wid
+                #change left
+                lane_center=lane_center.get_left_lane()
+                if not test_waypoint(lane_center, True):
+                    Lcen = 7
+                    fLcen = -2
+                else:
+                    Lcen =compute(lane_center,ego_location)
+                    fLcen = -abs(Lcen) / (lane_center.lane_width/2)
             elif action == 1 and self.current_lane == self.last_lane:
-                Lcen = lane_wid - t
-                fLcen = -Lcen / lane_wid
+                #change right
+                lane_center=lane_center.get_right_lane()
+                if not test_waypoint(lane_center,True):
+                    Lcen = 7
+                    fLcen = -2
+                else:
+                    Lcen =compute(lane_center,ego_location)
+                    fLcen=-abs(Lcen)/(lane_center.lane_width/2)
             else:
-                fLcen = -Lcen / (lane_wid / 2)
+                #lane follow
+                Lcen =compute(lane_center,ego_location)
+                fLcen = -abs(Lcen)/(lane_center.lane_width/2)
             print('pdqn_lane_center: Lcen, fLcen: ', Lcen, fLcen)
         return Lcen, fLcen
 

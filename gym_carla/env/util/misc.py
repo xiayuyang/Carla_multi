@@ -309,21 +309,29 @@ def get_lane_center(map, location):
 #     return yaw_diff
 def get_yaw_diff(vector1,vector2):
     """
-    Get two vectors' yaw difference in radians (0-PI), and
-    negative value means vector1 is on the left of vector2, positive is on the right of vector2.
+    Get two vectors' yaw difference in radians (0-PI),
     The vector format should be carla.Vector3D, and we set the vectors' z value to 0 because of the map been working on.
     """
     vector1.z = 0
     vector2.z = 0
     # vector1=vector1.make_unit_vector()
     # vector2=vector2.make_unit_vector()
-    theta_sign=1 if vector1.cross(vector2).z >= 0 else -1
+    theta_sign=get_sign(vector1,vector2)
     if vector1.length() != 0.0 and vector2.length() != 0.0:
         theta = math.acos(
             np.clip(vector1.dot(vector2)/(vector1.length()*vector2.length()), -1, 1))
     else:
         theta = 0
     return theta_sign*theta
+
+def get_sign(vector1,vector2):
+    """negative value means vector1 is on the left of vector2, positive is on the right of vector2.
+    The vector format should be carla.Vector3D, and we set the vectors' z value to 0 because of the map been working on."""
+    vector1.z=0
+    vector2.z=0
+    
+    sign=1 if vector1.cross(vector2).z >= 0 else -1
+    return sign
 
 def get_speed(vehicle, unit=True):
     """
