@@ -72,10 +72,12 @@ class ReplayBuffer:
         state_veh_rear = np.array(state['vehicle_info'][4], dtype=np.float32).reshape((1, -1))
         state_veh_right_rear = np.array(state['vehicle_info'][5], dtype=np.float32).reshape((1, -1))
         state_ev = np.array(state['ego_vehicle'], dtype=np.float32).reshape((1, -1))
+        state_light=np.array(state['light'],dtype=np.float32).reshape((1,-1))
 
-        state_ = np.concatenate((state_left_wps, state_veh_left_front, state_veh_left_rear,
-                                 state_center_wps, state_veh_front, state_veh_rear,
-                                 state_right_wps, state_veh_right_front, state_veh_right_rear, state_ev), axis=1)
+        state_ = np.concatenate((state_left_wps, state_veh_left_front, state_veh_left_rear,state_light,
+                                 state_center_wps, state_veh_front, state_veh_rear,state_light,
+                                 state_right_wps, state_veh_right_front, state_veh_right_rear,state_light, 
+                                 state_ev), axis=1)
         return state_
 
 

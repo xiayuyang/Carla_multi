@@ -1,22 +1,24 @@
-import logging
+import time
 import carla
 import random
+import logging
 import math, time
 import numpy as np
-import time
 from enum import Enum
 from queue import Queue
+from collections import deque
 #from gym_carla.env.agent.basic_agent import BasicAgent
-from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
-    compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
-    get_trafficlight_trigger_location, is_within_distance, get_sign
-from gym_carla.env.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
 from gym_carla.env.agent.local_planner import LocalPlanner
 from gym_carla.env.agent.global_planner import GlobalPlanner
 from gym_carla.env.agent.pid_controller import VehiclePIDController
+from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper
 from gym_carla.env.carla.behavior_agent import BehaviorAgent, BasicAgent
 from gym_carla.env.agent.basic_lanechanging_agent import Basic_Lanechanging_Agent
-from collections import deque
+from gym_carla.env.util.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
+from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
+    compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
+    get_trafficlight_trigger_location, is_within_distance, get_sign
+
 FOLLOW = 0
 CHANGE_LEFT = -1
 CHANGE_RIGHT = 1
@@ -99,15 +101,10 @@ class CarlaEnv:
         self.RL_switch = False
         self.TM_switch = False
         self.SWITCH_THRESHOLD = args.switch_threshold
-        self.next_wps = None  # ego vehicle's following waypoint list
-        self.left_wps = None
-        self.center_wps = None
-        self.right_wps = None
-        self.left_rear_wps = None
-        self.center_rear_wps = None
-        self.right_rear_wps = None
-        self.state_waypoints = None
-        self.draw_waypoints = None
+
+        self.lights_info=False
+        self.wps_info=WaypointWrapper()
+        self.vehs_info=VehicleWrapper()
 
         self.last_lane = None
         self.current_lane = None
@@ -169,33 +166,6 @@ class CarlaEnv:
         self.sensor_queue = Queue(maxsize=10)
         self.camera = None
         # self.print_traffic_light_info()
-
-
-    def print_traffic_light_info(self):
-        actor_list = self.world.get_actors()
-        lights_list = actor_list.filter("*traffic_light*")
-        # lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
-        for traffic_light in lights_list:
-            object_location = get_trafficlight_trigger_location(traffic_light)
-            object_waypoint = self.map.get_waypoint(object_location)
-            print(traffic_light, object_location, object_waypoint, object_waypoint.road_id)
-            # if object_waypoint.road_id != lane_center.road_id:
-            #     continue
-            #
-            # ve_dir = lane_center.transform.get_forward_vector()
-            # wp_dir = object_waypoint.transform.get_forward_vector()
-            # dot_ve_wp = ve_dir.x * wp_dir.x + ve_dir.y * wp_dir.y + ve_dir.z * wp_dir.z
-            #
-            # if dot_ve_wp < 0:
-            #     continue
-            #
-            # if traffic_light.state != carla.TrafficLightState.Red:
-            #     continue
-            #
-            # if is_within_distance(object_waypoint.transform, self._vehicle.get_transform(), 20, [0, 90]):
-            #     self._last_traffic_light = traffic_light
-            #     return (True, traffic_light)
-
 
     def __del__(self):
         logging.info('\n Destroying all vehicles')
@@ -277,19 +247,16 @@ class CarlaEnv:
         self.new_target_lane = self.current_lane
         print('current lane, target lane', self.current_lane, self.target_lane)
 
-        self.next_wps, red_light, o2 = self.local_planner.run_step()
-        self.state_waypoints, self.draw_waypoints = self.local_planner._get_waypoints_multilane()
-        self.left_wps, self.center_wps, self.right_wps, self.left_rear_wps, self.center_rear_wps, self.right_rear_wps = self.state_waypoints
-        self.vehicle_front, self.vehicle_rear, self.vehicle_inlane = self.local_planner._get_front_rear_inlane_vehicle()
-
+        self.wps_info, self.lights_info, self.vehs_info = self.local_planner.run_step()
+        
         # set ego vehicle controller
         self._ego_autopilot(True)
 
         # Only use RL controller after ego vehicle speed reach speed_threshold
         self.speed_state = SpeedState.START
-        self.controller = BasicAgent(self.ego_vehicle, {'target_speed': self.speed_threshold, 'dt': 1 / self.fps,
-                                                        'max_throttle': self.throttle_bound,
-                                                        'max_brake': self.brake_bound})
+        # self.controller = BasicAgent(self.ego_vehicle, {'target_speed': self.speed_threshold, 'dt': 1 / self.fps,
+        #                                                 'max_throttle': self.throttle_bound,
+        #                                                 'max_brake': self.brake_bound})
         # self.control_sigma={'Steer':random.choice([0.3, 0.4, 0.5]),
         #                 'Throttle_brake':random.choice([0.4,0.5,0.6])}
         self.control_sigma = {'Steer': random.choice([0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]),
@@ -297,12 +264,15 @@ class CarlaEnv:
         # self.control_sigma={'Steer': random.choice([0,0]),
         #                     'Throttle_brake': random.choice([0,0])}
 
-        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, target_speed=50, opt_dict={'ignore_traffic_lights': self.ignore_traffic_light,
-                                    'ignore_stop_signs': True, 'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
-                                    'sampling_radius': self.sampling_resolution, 'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,
-                                    'max_brake': self.brake_bound, 'buffer_size': self.buffer_size, 'ignore_front_vehicle': random.choice([True, False]),
-                                    'ignore_change_gap': random.choice([True, True, False]), 'lanechanging_fps': random.choice([40, 50, 60])})
-
+        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, target_speed=50, 
+                opt_dict={'ignore_traffic_lights': self.ignore_traffic_light,
+                            'ignore_stop_signs': True, 
+                            'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
+                            'sampling_radius': self.sampling_resolution, 
+                            'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,'max_brake': self.brake_bound, 
+                            'buffer_size': self.buffer_size, 'ignore_front_vehicle': random.choice([True, False]),
+                            'ignore_change_gap': random.choice([True, True, False]), 
+                            'lanechanging_fps': random.choice([40, 50, 60])})
 
         # code for synchronous mode
         camera_bp = self.world.get_blueprint_library().find('sensor.camera.rgb')
@@ -352,37 +322,22 @@ class CarlaEnv:
         self.reset_step += 1
 
         # return state information
-        return self._get_state({'state_waypoints': self.state_waypoints, 'vehicle_inlane': self.vehicle_inlane})
-
-    def my_set_destination(self):
-        # print('3')
-        lane_id = get_lane_center(self.map, self.ego_vehicle.get_location())
-        if lane_id == -1:
-            lane_change = random.choice([1])
-            if lane_change:
-                return self.right_wps[-1].transform.location
-        elif lane_id == -2:
-            lane_change = random.choice([-1, 1])
-            if lane_change == -1:
-                return self.left_wps[-1].transform.location
-            else:
-                return self.right_wps[-1].transform.location
-        elif lane_id == -3:
-            lane_change = random.choice([1])
-            if lane_change:
-                return self.left_wps[-1].transform.location
+        return self._get_state()
 
     def step(self, a_index, action):
         print('speed_state: ', self.speed_state)
-        self.autopilot_controller.set_info({'left_wps': self.left_wps, 'center_wps': self.center_wps,
-                                            'right_wps': self.right_wps, 'left_rear_wps': self.left_rear_wps,
-                                            'center_rear_wps': self.center_rear_wps, 'right_rear_wps': self.right_rear_wps,
-                                            'vehicle_inlane': self.vehicle_inlane})
+        self.autopilot_controller.set_info({'left_wps': self.wps_info.left_front_wps, 
+                'center_wps': self.wps_info.center_front_wps,'right_wps': self.wps_info.right_front_wps, 
+                'left_rear_wps': self.wps_info.left_rear_wps,'center_rear_wps': self.wps_info.center_rear_wps, 
+                'right_rear_wps': self.wps_info.right_rear_wps,
+                'vehicle_inlane': [self.vehs_info.left_front_veh,self.vehs_info.center_front_veh,self.vehs_info.right_front_veh,
+                                    self.vehs_info.left_rear_veh,self.vehs_info.center_rear_veh,self.vehs_info.right_rear_veh]})
         # print("1.current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
         #       self.target_lane, self.new_target_lane, self.last_action, self.new_action)
         self.step_info = None
-        self.next_wps = None
-        self.vehicle_front = None
+        self.lights_info=False
+        self.wps_info=WaypointWrapper()
+        self.vehs_info=VehicleWrapper()
         """throttle (float):A scalar value to control the vehicle throttle [0.0, 1.0]. Default is 0.0.
                 steer (float):A scalar value to control the vehicle steering [-1.0, 1.0]. Default is 0.0.
                 brake (float):A scalar value to control the vehicle brake [0.0, 1.0]. Default is 0.0."""
@@ -495,22 +450,21 @@ class CarlaEnv:
             # print(self.ego_vehicle.get_speed_limit(),get_speed(self.ego_vehicle,False),get_acceleration(self.ego_vehicle,False),sep='\t')
             # route planner
             # self.next_wps, _, self.vehicle_front = self.local_planner.run_step()
-            self.next_wps, red_light, o2 = self.local_planner.run_step()
-            print(f"Red Light: {red_light}")
-            self.state_waypoints, self.draw_waypoints = self.local_planner._get_waypoints_multilane()
-            self.left_wps, self.center_wps, self.right_wps, self.left_rear_wps, self.center_rear_wps, self.right_rear_wps = self.state_waypoints
-            self.vehicle_front, self.vehicle_rear, self.vehicle_inlane = self.local_planner._get_front_rear_inlane_vehicle()
+            self.wps_info, self.lights_info, self.vehs_info = self.local_planner.run_step()
+            print(f"Red Light: {self.lights_info}")
 
             if self.debug:
                 # run the ego vehicle with PID_controller
-                if self.next_wps[0].id != self.former_wp.id:
-                    self.former_wp = self.next_wps[0]
                 # draw front waypoints
                 # draw_waypoints(self.world, [self.next_wps[0]], 60, z=1)
-                self.draw_p(self.draw_waypoints)
+                draw_waypoints(self.world, self.wps_info.center_front_wps+self.wps_info.center_rear_wps+\
+                    self.wps_info.left_front_wps+self.wps_info.left_rear_wps+self.wps_info.right_front_wps+self.wps_info.right_rear_wps, 
+                    1.0 / self.fps + 0.001, z=1)
                 control = None
             else:
-                self.draw_p(self.draw_waypoints)
+                draw_waypoints(self.world, self.wps_info.center_front_wps+self.wps_info.center_rear_wps+\
+                    self.wps_info.left_front_wps+self.wps_info.left_rear_wps+self.wps_info.right_front_wps+self.wps_info.right_rear_wps, 
+                    1.0 / self.fps + 0.001, z=1)
 
             spectator = self.world.get_spectator()
             transform = self.ego_vehicle.get_transform()
@@ -518,25 +472,23 @@ class CarlaEnv:
                                                     carla.Rotation(pitch=-90)))
             camera_data = self.sensor_queue.get(block=True)
 
-            if self.ego_vehicle.get_location().distance(self.former_wp.transform.location) >= self.sampling_resolution:
-                self.former_wp = self.next_wps[0]
             temp = []
-            if self.vehicle_inlane[3] is not None:
-                temp.append(get_speed(self.vehicle_inlane[3], False))
+            if self.vehs_info.left_rear_veh is not None:
+                temp.append(get_speed(self.vehs_info.left_rear_veh, False))
             else:
                 temp.append(-1)
-            if self.vehicle_inlane[4] is not None:
-                temp.append(get_speed(self.vehicle_inlane[4], False))
+            if self.vehs_info.center_rear_veh is not None:
+                temp.append(get_speed(self.vehs_info.center_rear_veh, False))
             else:
                 temp.append(-1)
-            if self.vehicle_inlane[5] is not None:
-                temp.append(get_speed(self.vehicle_inlane[5], False))
+            if self.vehs_info.right_rear_veh is not None:
+                temp.append(get_speed(self.vehs_info.right_rear_veh, False))
             else:
                 temp.append(-1)
             self.rear_vel_deque.append(temp)
             """Attention: The sequence of following code is pivotal, do not recklessly change their execution order"""
             reward = self._get_reward(self.last_action, self.last_lane, self.current_lane, self.distance_to_front_vehicles, self.distance_to_rear_vehicles)
-            state = self._get_state({'state_waypoints': self.state_waypoints, 'vehicle_inlane': self.vehicle_inlane})
+            state = self._get_state()
             self.step_info.update({'Reward': reward})
             lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
             yaw_forward = lane_center.transform.get_forward_vector().make_unit_vector()
@@ -576,23 +528,30 @@ class CarlaEnv:
         else:
             return state, reward, self._truncated(), self._done(), self._get_info()
 
-    def draw_p(self, p):
-        w1, w2, w3, w4, w5, w6 = p
-        draw_waypoints(self.world, w1, 1.0 / self.fps + 0.001, z=1)
-        draw_waypoints(self.world, w2, 1.0 / self.fps + 0.001, z=1)
-        draw_waypoints(self.world, w3, 1.0 / self.fps + 0.001, z=1)
-        # draw rear waypoints
-        draw_waypoints(self.world, w4, 1.0 / self.fps + 0.001, z=1)
-        draw_waypoints(self.world, w5, 1.0 / self.fps + 0.001, z=1)
-        draw_waypoints(self.world, w6, 1.0 / self.fps + 0.001, z=1)
+    def my_set_destination(self):
+        # print('3')
+        lane_id = get_lane_center(self.map, self.ego_vehicle.get_location())
+        if lane_id == -1:
+            lane_change = random.choice([1])
+            if lane_change:
+                return self.right_wps[-1].transform.location
+        elif lane_id == -2:
+            lane_change = random.choice([-1, 1])
+            if lane_change == -1:
+                return self.left_wps[-1].transform.location
+            else:
+                return self.right_wps[-1].transform.location
+        elif lane_id == -3:
+            lane_change = random.choice([1])
+            if lane_change:
+                return self.left_wps[-1].transform.location
 
     def get_observation_space(self):
         """
-        TODO
         :return:
         """
         """Get observation space of cureent environment"""
-        return {'waypoints': 10, 'ego_vehicle': 6, 'conventional_vehicle': 3}
+        return {'waypoints': 10, 'ego_vehicle': 6, 'conventional_vehicle': 3, 'light':2}
 
     def get_action_bound(self):
         """Return action bound of ego vehicle controller"""
@@ -705,7 +664,7 @@ class CarlaEnv:
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
         return lane_center.lane_id
 
-    def _get_state(self, dict):
+    def _get_state(self):
         """return a tuple: the first element is next waypoints, the second element is vehicle_front information"""
 
         # The wps_length here is a litle tricky, compared with the commented version
@@ -713,8 +672,9 @@ class CarlaEnv:
         wps_length = self.sampling_resolution * self.buffer_size
         wps = []
         # {'state_waypoints': self.state_waypoints, 'vehicle_inlane': self.vehicle_inlane}
-        left_wps, center_wps, right_wps, left_rear_wps, center_rear_wps, right_rear_wps = dict['state_waypoints']
-        left_front_veh, center_front_veh, right_front_veh, left_rear_veh, center_rear_veh, right_rear_veh = dict['vehicle_inlane']
+        left_wps=self.wps_info.left_front_wps
+        center_wps=self.wps_info.center_front_wps
+        right_wps=self.wps_info.right_front_wps
 
         # print(self.ego_vehicle.get_transform().rotation,
         #     dict['waypoints'][0].road_id,dict['waypoints'][0].lane_id,dict['waypoints'][0].transform.rotation,
@@ -768,7 +728,10 @@ class CarlaEnv:
         right_wall = False
         if len(right_wps) == 0:
             right_wall = True
-        vehicle_inlane_processed = self.process_veh(dict['vehicle_inlane'], lane_center, left_wall, right_wall)
+        vehicle_inlane_processed = self.process_veh(
+            [self.vehs_info.left_front_veh,self.vehs_info.center_front_veh,self.vehs_info.right_front_veh,
+            self.vehs_info.left_rear_veh,self.vehs_info.center_rear_veh,self.vehs_info.right_rear_veh], 
+            lane_center, left_wall, right_wall)
         # if dict['vehicle_front']:
         #     vehicle_front = dict['vehicle_front']
         #     ego_speed = get_speed(self.ego_vehicle, False)
@@ -809,8 +772,9 @@ class CarlaEnv:
         Upon initializing, there are some bugs in the theta_v and theta_a, which could be greater than 90,
         this might be caused by carla."""
         return {'left_waypoints': left_wps_processed, 'center_waypoints': center_wps_processed,
-                'right_waypoints': right_wps_processed, 'ego_vehicle': [v_s/10, v_t/10, a_s/3, a_t/3, ego_t, yaw_diff_ego/90],
-                'vehicle_info': vehicle_inlane_processed}
+                'right_waypoints': right_wps_processed, 'vehicle_info': vehicle_inlane_processed,
+                'ego_vehicle': [v_s/10, v_t/10, a_s/3, a_t/3, ego_t, yaw_diff_ego/90],
+                'light':[0,1] if self.lights_info else [1,0]}
 
     def calculate_lane_change_reward(self, last_action, last_lane, current_lane, current_action, distance_to_front_vehicles, distance_to_rear_vehicles):
         print('distance_to_front_vehicles, distance_to_rear_vehicles: ', distance_to_front_vehicles, distance_to_rear_vehicles)
@@ -1167,7 +1131,8 @@ class CarlaEnv:
         if self.map.get_waypoint(self.ego_vehicle.get_location()) is None:
             logging.warn('vehicle drive out of road')
             return True
-        if get_speed(self.ego_vehicle, False) < self.speed_min and self.speed_state != SpeedState.START and self.rl_control_step < 100000:
+        if get_speed(self.ego_vehicle, False) < self.speed_min and self.speed_state != SpeedState.START and\
+                not self.lights_info and not self.vehs_info.center_front_veh:
             logging.warn('vehicle speed too low')
             return True
         # if self.lane_invasion_sensor.get_invasion_count()!=0:
@@ -1180,7 +1145,7 @@ class CarlaEnv:
         return False
 
     def _done(self):
-        if self.RL_switch and self.next_wps[2].transform.location.distance(
+        if self.RL_switch and self.wps_info.center_front_wps[2].transform.location.distance(
                 self.ego_spawn_point.location) < self.sampling_resolution:
             # The local planner's waypoint list has been depleted
             logging.info('vehicle reach destination, simulation terminate')
@@ -1190,7 +1155,7 @@ class CarlaEnv:
                 # Let the traffic manager only execute 5000 steps. or it can fill the replay buffer
                 logging.info('5000 steps passed under traffic manager control')
                 return True
-            if self.next_wps[2].transform.location.distance(
+            if self.wps_info.center_front_wps[2].transform.location.distance(
                     self.ego_spawn_point.location) < self.sampling_resolution:
                 # The second next waypoints is close enough to the spawn point, route done
                 logging.info('vehicle reach destination under basic agent, simulation terminate')
@@ -1216,9 +1181,9 @@ class CarlaEnv:
             self.traffic_manager.distance_to_leading_vehicle(self.ego_vehicle, self.min_distance)
             if self.ignore_traffic_light:
                 self.traffic_manager.ignore_lights_percentage(self.ego_vehicle, 100)
-            self.traffic_manager.ignore_signs_percentage(self.ego_vehicle, 100)
+                self.traffic_manager.ignore_signs_percentage(self.ego_vehicle, 100)
+                self.traffic_manager.ignore_walkers_percentage(self.ego_vehicle, 100)
             self.traffic_manager.ignore_vehicles_percentage(self.ego_vehicle, 0)
-            self.traffic_manager.ignore_walkers_percentage(self.ego_vehicle, 100)
             self.traffic_manager.vehicle_percentage_speed_difference(self.ego_vehicle, speed_diff)
             if self.auto_lanechange and self.speed_state == SpeedState.RUNNING:
                 self.traffic_manager.auto_lane_change(self.ego_vehicle, True)
@@ -1390,6 +1355,10 @@ class CarlaEnv:
                 if self.ignore_traffic_light:
                     self.traffic_manager.ignore_lights_percentage(
                         self.world.get_actor(response.actor_id), 100)
+                    self.traffic_manager.ignore_signs_percentage(
+                        self.world.get_actor(response.actor_id), 100)
+                    self.traffic_manager.ignore_walkers_percentage(
+                        self.world.get_actor(response.actor_id), 100)
                 self.traffic_manager.auto_lane_change(
                     self.world.get_actor(response.actor_id), False)
                 # modify change probability
@@ -1397,10 +1366,7 @@ class CarlaEnv:
                 #     self.world.get_actor(response.actor_id), 10)
                 # self.traffic_manager.random_right_lanechange_percentage(
                 #     self.world.get_actor(response.actor_id), 10)
-                self.traffic_manager.ignore_signs_percentage(
-                    self.world.get_actor(response.actor_id), 100)
-                self.traffic_manager.ignore_walkers_percentage(
-                    self.world.get_actor(response.actor_id), 100)
+                
                 self.traffic_manager.set_route(self.world.get_actor(response.actor_id),
                                                ['Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight'])
                 self.traffic_manager.update_vehicle_lights(
