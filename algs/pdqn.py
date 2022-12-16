@@ -7,7 +7,7 @@ from torch.autograd import Variable
 
 
 class ReplayBuffer:
-    """经验回放池"""
+"""经验回放池"""
 
     def __init__(self, capacity) -> None:
         self.buffer = collections.deque(maxlen=capacity)  # 队列，先进先出
@@ -22,10 +22,10 @@ class ReplayBuffer:
         lane_center = info["offlane"]
         reward_ttc = info["TTC"]
         reward_eff = info["velocity"]
-        if reward_ttc < -0.1 or reward_eff < 3:
-            self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
-        if truncated:
-            self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
+        # if reward_ttc < -0.1 or reward_eff < 3:
+        #     self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
+        # if truncated:
+        #     self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         if action == 0 or action == 2:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         self.tmp_buffer.append((state, action, action_param, reward, next_state, truncated, done))
@@ -72,12 +72,10 @@ class ReplayBuffer:
         state_veh_rear = np.array(state['vehicle_info'][4], dtype=np.float32).reshape((1, -1))
         state_veh_right_rear = np.array(state['vehicle_info'][5], dtype=np.float32).reshape((1, -1))
         state_ev = np.array(state['ego_vehicle'], dtype=np.float32).reshape((1, -1))
-        state_light=np.array(state['light'],dtype=np.float32).reshape((1,-1))
 
-        state_ = np.concatenate((state_left_wps, state_veh_left_front, state_veh_left_rear,state_light,
-                                 state_center_wps, state_veh_front, state_veh_rear,state_light,
-                                 state_right_wps, state_veh_right_front, state_veh_right_rear,state_light, 
-                                 state_ev), axis=1)
+        state_ = np.concatenate((state_left_wps, state_veh_left_front, state_veh_left_rear,
+                                 state_center_wps, state_veh_front, state_veh_rear,
+                                 state_right_wps, state_veh_right_front, state_veh_right_rear, state_ev), axis=1)
         return state_
 
 
@@ -87,17 +85,49 @@ class veh_lane_encoder(torch.nn.Module):
         self.state_dim = state_dim
         self.train = train
         self.lane_encoder = nn.Linear(state_dim['waypoints'], 32)
-        self.veh_encoder = nn.Linear(state_dim['conventional_vehicle'] * 2, 32)
-        self.agg = nn.Linear(64, 64)
+        self.veh_encoder = nn.Linear(state_dim['conventional_vehicle'] * 2, 64)
+        self.light_encoder = nn.Linear(state_dim['light'], 32)
+        self.agg = nn.Linear(128, 64)
 
     def forward(self, lane_veh):
         lane = lane_veh[:, :self.state_dim["waypoints"]]
-        veh = lane_veh[:, self.state_dim["waypoints"]:]
+        veh = lane_veh[:, self.state_dim["waypoints"]:-self.state_dim['light']]
+        light = lane_veh[:, -self.state_dim['light']:]
         lane_enc = F.relu(self.lane_encoder(lane))
         veh_enc = F.relu(self.veh_encoder(veh))
-        state_cat = torch.cat((lane_enc, veh_enc), dim=1)
+        light_enc = F.relu(self.light_encoder(light))
+        state_cat = torch.cat((lane_enc, veh_enc, lane_enc), dim=1)
         state_enc = F.relu(self.agg(state_cat))
         return state_enc
+
+
+# class lane_wise_cross_attention_encoder(torch.nn.Module):
+#     def __init__(self, state_dim, train=True):
+#         super().__init__()
+#         self.state_dim = state_dim
+#         self.train = train
+#         self.lane_encoder = nn.Linear(state_dim['waypoints'], 32)
+#         self.veh_encoder = nn.Linear(state_dim['conventional_vehicle'] * 2, 32)
+#         self.light_encoder = nn.Linear(state_dim['light'], 32)
+#         self.ego_encoder = nn.Linear(state_dim['ego_vehicle'], 32)
+#         self.w = nn.Linear(64, 64)
+#         self.a = nn.Linear(64, 1)
+#         self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
+#
+#
+#     def forward(self, lane_veh, ego_info):
+#         lane = lane_veh[:, :self.state_dim["waypoints"]]
+#         veh = lane_veh[:, self.state_dim["waypoints"]:-self.state_dim['light']]
+#         light = lane_veh[:, -self.state_dim['light']]
+#         ego_enc = F.relu(self.ego_encoder(ego_info))
+#         lane_enc = self.w(torch.cat((F.relu(self.lane_encoder(lane)), ego_enc), 1))
+#         veh_enc = self.w(torch.cat((F.relu(self.veh_encoder(veh)), ego_enc), 1))
+#         light_enc = self.w(torch.cat((F.relu(self.light_encoder(light)), ego_enc), 1))
+#         score_lane = self.a(lane_enc)
+#         score_veh = self.a(veh_enc)
+#         score_light = self.a(light_enc)
+#
+#         return state_enc
 
 
 class PolicyNet_multi(torch.nn.Module):
@@ -124,11 +154,12 @@ class PolicyNet_multi(torch.nn.Module):
 
     def forward(self, state):
         # state: (waypoints + 2 * conventional_vehicle0 * 3
-        one_state_dim = self.state_dim['waypoints'] + self.state_dim['conventional_vehicle'] * 2
+        one_state_dim = self.state_dim['waypoints'] + self.state_dim['conventional_vehicle'] * 2 + self.state_dim['light']
+        ego_info = state[:, 3*one_state_dim:]
         left_enc = self.left_encoder(state[:, :one_state_dim])
         center_enc = self.center_encoder(state[:, one_state_dim:2*one_state_dim])
         right_enc = self.right_encoder(state[:, 2*one_state_dim:3*one_state_dim])
-        ego_enc = self.ego_encoder(state[:, 3*one_state_dim:])
+        ego_enc = self.ego_encoder(ego_info)
         state_ = torch.cat((left_enc, center_enc, right_enc, ego_enc), dim=1)
         hidden = F.relu(self.fc(state_))
         action = torch.tanh(self.fc_out(hidden))
@@ -170,11 +201,12 @@ class QValueNet_multi(torch.nn.Module):
         # torch.nn.init.xavier_normal_(self.fc_out.weight.data)
 
     def forward(self, state, action):
-        one_state_dim = self.state_dim['waypoints'] + self.state_dim['conventional_vehicle'] * 2
+        one_state_dim = self.state_dim['waypoints'] + self.state_dim['conventional_vehicle'] * 2 + self.state_dim['light']
+        ego_info = state[:, 3*one_state_dim:]
         left_enc = self.left_encoder(state[:, :one_state_dim])
         center_enc = self.center_encoder(state[:, one_state_dim:2*one_state_dim])
         right_enc = self.right_encoder(state[:, 2*one_state_dim:3*one_state_dim])
-        ego_enc = self.ego_encoder(state[:, 3*one_state_dim:])
+        ego_enc = self.ego_encoder(ego_info)
         action_enc = self.action_encoder(action)
         state_ = torch.cat((left_enc, center_enc, right_enc, ego_enc, action_enc), dim=1)
         hidden = F.relu(self.fc(state_))
