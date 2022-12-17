@@ -120,8 +120,8 @@ class lane_wise_cross_attention_encoder(torch.nn.Module):
         batch_size = lane_veh.shape[0]
         lane = lane_veh[:, :self.state_dim["waypoints"]]
         veh = lane_veh[:, self.state_dim["waypoints"]:-self.state_dim['light']]
-        light = lane_veh[:, -self.state_dim['light']]
-        print('ego_info.shape: ', ego_info.shape)
+        light = lane_veh[:, -self.state_dim['light']:]
+        # print('ego_info.shape: ', ego_info.shape)
         ego_enc = self.w(F.relu(self.ego_encoder(ego_info)))
         lane_enc = self.w(F.relu(self.lane_encoder(lane)))
         veh_enc = self.w(F.relu(self.veh_encoder(veh)))
@@ -134,7 +134,7 @@ class lane_wise_cross_attention_encoder(torch.nn.Module):
         # score_: [batch_size, 1]
         score = torch.cat((score_lane, score_veh, score_light), 1)
         score = F.softmax(score, 1).reshape(batch_size, 1, 3)
-        state_enc = torch.matmul(score, state_enc)
+        state_enc = torch.matmul(score, state_enc).reshape(batch_size, self.hidden_size)
         # state_enc: [N, 64]
         return state_enc
 
@@ -164,9 +164,9 @@ class PolicyNet_multi(torch.nn.Module):
     def forward(self, state):
         # state: (waypoints + 2 * conventional_vehicle0 * 3
         one_state_dim = self.state_dim['waypoints'] + self.state_dim['conventional_vehicle'] * 2 + self.state_dim['light']
-        print(state.shape, one_state_dim)
+        # print(state.shape, one_state_dim)
         ego_info = state[:, 3*one_state_dim:]
-        print(ego_info.shape)
+        # print(ego_info.shape)
         left_enc = self.left_encoder(state[:, :one_state_dim], ego_info)
         center_enc = self.center_encoder(state[:, one_state_dim:2*one_state_dim], ego_info)
         right_enc = self.right_encoder(state[:, 2*one_state_dim:3*one_state_dim], ego_info)
@@ -289,10 +289,11 @@ class P_DQN:
         state_veh_left_rear = torch.tensor(state['vehicle_info'][3], dtype=torch.float32).view(1, -1).to(self.device)
         state_veh_rear = torch.tensor(state['vehicle_info'][4], dtype=torch.float32).view(1, -1).to(self.device)
         state_veh_right_rear = torch.tensor(state['vehicle_info'][5], dtype=torch.float32).view(1, -1).to(self.device)
+        state_light = torch.tensor(state['light'], dtype=torch.float32).view(1, -1).to(self.device)
         state_ev = torch.tensor(state['ego_vehicle'],dtype=torch.float32).view(1,-1).to(self.device)
-        state_ = torch.cat((state_left_wps, state_veh_left_front, state_veh_left_rear,
-                            state_center_wps, state_veh_front, state_veh_rear,
-                            state_right_wps, state_veh_right_front, state_veh_right_rear, state_ev), dim=1)
+        state_ = torch.cat((state_left_wps, state_veh_left_front, state_veh_left_rear, state_light,
+                            state_center_wps, state_veh_front, state_veh_rear, state_light,
+                            state_right_wps, state_veh_right_front, state_veh_right_rear, state_light, state_ev), dim=1)
         # print(state_.shape)
         all_action_param = self.actor(state_)
         q_a = torch.squeeze(self.critic(state_, all_action_param))

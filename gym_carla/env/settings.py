@@ -109,7 +109,7 @@ ARGS.add_argument(
 ARGS.add_argument(
     '--hybrid',
     action='store_true',
-    default=True,
+    default=False,
     help='Activate hybrid mode for Traffic Manager')
 ARGS.add_argument(
     '--auto_lane_change',
@@ -173,7 +173,7 @@ ARGS.add_argument(
 )
 ARGS.add_argument(
     '--pre_train_steps', type=int,
-    default=200,
+    default=20000,
     help='Let the RL controller and PID controller alternatively take control every 500 steps'
 )
 ARGS.add_argument(
