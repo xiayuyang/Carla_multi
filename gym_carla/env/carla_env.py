@@ -854,9 +854,9 @@ class CarlaEnv:
         v_s = v_3d.length() * math.cos(theta_v)
         if v_s * 3.6 > self.speed_limit:
             # fEff = 1
-            fEff = math.exp(self.speed_limit - v_s * 3.6) - 1
+            fEff = math.exp(self.speed_limit - v_s * 3.6)
         else:
-            fEff = v_s * 3.6 / self.speed_limit - 1
+            fEff = v_s * 3.6 / self.speed_limit
 
         cur_acc = self.get_acc_s(self.ego_vehicle.get_acceleration(), yaw_forward)
 
