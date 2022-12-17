@@ -183,7 +183,7 @@ ARGS.add_argument(
 )
 ARGS.add_argument(
     '--traffic_light_proximity', type=float,
-    default=50.0,
+    default=20.0,
     help='Distance for searching traffic light in front of ego vehicle, unit -- meters'
 )
 ARGS.add_argument(

@@ -420,12 +420,12 @@ class CarlaEnv:
                 if self.is_effective_action() and not self.TM_switch:
                     self.ego_vehicle.apply_control(control)
             else:
-                control.steer = np.clip(np.random.normal(control.steer,self.control_sigma['Steer']),-self.steer_bound,self.steer_bound)
+                #control.steer = np.clip(np.random.normal(control.steer,self.control_sigma['Steer']),-self.steer_bound,self.steer_bound)
                 if control.throttle > 0:
                     throttle_brake = control.throttle
                 else:
                     throttle_brake = -control.brake
-                throttle_brake = np.clip(np.random.normal(throttle_brake,self.control_sigma['Throttle_brake']),-self.brake_bound,self.throttle_bound)
+                #throttle_brake = np.clip(np.random.normal(throttle_brake,self.control_sigma['Throttle_brake']),-self.brake_bound,self.throttle_bound)
                 if throttle_brake > 0:
                     control.throttle = throttle_brake
                     control.brake = 0
@@ -1045,6 +1045,9 @@ class CarlaEnv:
         if self.step_info['Lane_center'] < -1.8:
             logging.warn('lane invasion occur')
             return True
+        if self.step_info['Yaw'] < -1.0:
+            logging.warn('moving in the opposite direction')
+            return True
         if self.lights_info and self.lights_info.state!=carla.TrafficLightState.Green and \
                 is_within_distance_ahead(self.lights_info.get_location(),self.ego_vehicle.get_location(),
                     self.ego_vehicle.get_transform(),self.min_distance):
@@ -1207,6 +1210,13 @@ class CarlaEnv:
         # Let the companion vehicles drive a bit faster than ego speed limit
         self.traffic_manager.global_percentage_speed_difference(-100)
         self.traffic_manager.set_synchronous_mode(self.sync)
+
+        #set traffic light elpse time
+        lights_list=self.world.get_actors().filter("*traffic_light*")
+        for light in lights_list:
+            light.set_green_time(10)
+            light.set_red_time(5)
+            light.set_yellow_time(0)
 
     def _try_spawn_ego_vehicle_at(self, transform):
         """Try to spawn a  vehicle at specific transform

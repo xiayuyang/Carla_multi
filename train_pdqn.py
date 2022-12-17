@@ -146,7 +146,7 @@ def main():
                                       f"all_action_param:{all_action_param}\n"
                                       f"reward:{reward}\n"
                                       f"truncated:{truncated}, done:{done}")
-                                print()
+                            print()
 
                             if agent.replay_buffer.size() > MINIMAL_SIZE:
                                 logging.info("Learn begin: %f %f", SIGMA_STEER,SIGMA_ACC)
