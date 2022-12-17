@@ -8,7 +8,7 @@ from algs.pdqn import P_DQN
 from gym_carla.env.settings import ARGS
 from gym_carla.env.carla_env import CarlaEnv
 from process import start_process, kill_process
-from gym_carla.env.util.misc import fill_action_param
+from gym_carla.env.util.wrapper import fill_action_param
 from collections import deque
 
 # neural network hyper parameters
@@ -149,9 +149,7 @@ def main():
                                 print()
 
                             if agent.replay_buffer.size() > MINIMAL_SIZE:
-                                # logging.info("Learn begin: %f", SIGMA_STEER)
-                                logging.info("Learn begin: %f", SIGMA_STEER)
-                                logging.info("Learn begin: %f", SIGMA_ACC)
+                                logging.info("Learn begin: %f %f", SIGMA_STEER,SIGMA_ACC)
                                 agent.learn()
 
                             state = next_state

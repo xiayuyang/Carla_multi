@@ -11,13 +11,14 @@ from collections import deque
 from gym_carla.env.agent.local_planner import LocalPlanner
 from gym_carla.env.agent.global_planner import GlobalPlanner
 from gym_carla.env.agent.pid_controller import VehiclePIDController
-from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper
 from gym_carla.env.carla.behavior_agent import BehaviorAgent, BasicAgent
 from gym_carla.env.agent.basic_lanechanging_agent import Basic_Lanechanging_Agent
 from gym_carla.env.util.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
+from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper,process_lane_wp,process_veh, \
+    process_action,recovery_action,fill_action_param
 from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
     compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
-    get_trafficlight_trigger_location, is_within_distance, get_sign
+    get_trafficlight_trigger_location, is_within_distance, get_sign,is_within_distance_ahead
 
 FOLLOW = 0
 CHANGE_LEFT = -1
@@ -102,7 +103,7 @@ class CarlaEnv:
         self.TM_switch = False
         self.SWITCH_THRESHOLD = args.switch_threshold
 
-        self.lights_info=False
+        self.lights_info=None
         self.wps_info=WaypointWrapper()
         self.vehs_info=VehicleWrapper()
 
@@ -335,7 +336,7 @@ class CarlaEnv:
         # print("1.current lane, target lane, new_target_lane, last action, new action: ", self.current_lane,
         #       self.target_lane, self.new_target_lane, self.last_action, self.new_action)
         self.step_info = None
-        self.lights_info=False
+        self.lights_info=None
         self.wps_info=WaypointWrapper()
         self.vehs_info=VehicleWrapper()
         """throttle (float):A scalar value to control the vehicle throttle [0.0, 1.0]. Default is 0.0.
@@ -358,7 +359,7 @@ class CarlaEnv:
         if not self.modify_change_steer:
             steer = np.clip(action[0][0], -self.steer_bound, self.steer_bound)
         else:
-            steer = self.process_action(a_index, action[0][0])
+            steer = process_action(a_index, action[0][0])
         if action[0][1] >= 0:
             brake = 0
             throttle = np.clip(action[0][1], 0, self.throttle_bound)
@@ -451,7 +452,7 @@ class CarlaEnv:
             # route planner
             # self.next_wps, _, self.vehicle_front = self.local_planner.run_step()
             self.wps_info, self.lights_info, self.vehs_info = self.local_planner.run_step()
-            print(f"Red Light: {self.lights_info}")
+            print(f"Light State: {self.lights_info.state if self.lights_info else None}")
 
             if self.debug:
                 # run the ego vehicle with PID_controller
@@ -567,99 +568,6 @@ class CarlaEnv:
     def render(self, mode):
         pass
 
-    def process_action(self, a_index, steer):
-        # left: steering is negative[-1, 0], right: steering is positive[0, 1]
-        processed_steer = steer
-        if a_index == 0:
-            processed_steer = steer * 0.5 - 0.5
-        elif a_index == 2:
-            processed_steer = steer * 0.5 + 0.5
-        return processed_steer
-
-    def recovery_action(self, action, action_param):
-        # recovery [-1, 1] from left change and right change
-        steer = action_param[2*action]
-        if action == 0:
-            steer = np.clip(steer, -1, 0.1)
-            steer = (steer + 0.5) * 2
-        elif action == 2:
-            steer = np.clip(steer, -0.1, 1)
-            steer = (steer - 0.5) * 2
-        return steer
-
-    def process_lane_wp(self, lane_width, wps_list, ego_vehicle_z, ego_forward_vector, my_sample_ratio, flag, t):
-        wps = []
-        idx = 0
-        final_t = t
-        if flag == -1:
-            final_t = lane_width / 2 + t
-        elif flag == 1:
-            final_t = lane_width / 2 - t
-
-        for wp in wps_list:
-            delta_z = wp.transform.location.z - ego_vehicle_z
-            yaw_diff = math.degrees(get_yaw_diff(wp.transform.get_forward_vector(), ego_forward_vector))
-            yaw_diff = yaw_diff / 90
-            if idx % my_sample_ratio == my_sample_ratio-1:
-                wps.append([delta_z/3, yaw_diff, flag])
-            idx = idx + 1
-        return np.array(wps)
-
-    def process_veh(self, vehicle_inlane, lane_center, left_wall, right_wall):
-        ego_speed = get_speed(self.ego_vehicle, False)
-        ego_location = self.ego_vehicle.get_location()
-        ego_bounding_x = self.ego_vehicle.bounding_box.extent.x
-        ego_bounding_y = self.ego_vehicle.bounding_box.extent.y
-        max_speed = self.speed_limit
-        all_v_info = []
-        print('vehicle_inlane: ', vehicle_inlane)
-        for i in range(6):
-            if i == 0 or i == 3:
-                lane = -1
-            elif i == 1 or i == 4:
-                lane = 0
-            else:
-                lane = 1
-            veh = vehicle_inlane[i]
-            wall = False
-            if left_wall and (i == 0 or i == 3):
-                wall = True
-            if right_wall and (i == 2 or i == 5):
-                wall = True
-            if wall:
-                if i < 3:
-                    v_info = [0.001, 0, lane]
-                else:
-                    v_info = [-0.001, 0, lane]
-            else:
-                if veh is None:
-                    if i < 3:
-                        v_info = [1, 0, lane]
-                    else:
-                        v_info = [-1, 0, lane]
-                else:
-                    veh_speed = get_speed(veh, False)
-                    rel_speed = ego_speed - veh_speed
-
-                    distance = ego_location.distance(veh.get_location())
-                    vehicle_len = max(abs(ego_bounding_x), abs(ego_bounding_y)) + \
-                        max(abs(veh.bounding_box.extent.x), abs(veh.bounding_box.extent.y))
-                    distance -= vehicle_len
-
-                    if distance < 0:
-                        if i < 3:
-                            v_info = [0.001, rel_speed, lane]
-                        else:
-                            v_info = [-0.001, -rel_speed, lane]
-                    else:
-                        if i < 3:
-                            v_info = [distance / self.vehicle_proximity, rel_speed, lane]
-                        else:
-                            v_info = [-distance / self.vehicle_proximity, -rel_speed, lane]
-            all_v_info.append(v_info)
-        # print(all_v_info)
-        return np.array(all_v_info)
-
     def get_ego_lane(self):
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
         return lane_center.lane_id
@@ -696,7 +604,6 @@ class CarlaEnv:
         #     for _ in range(gap):
         #         wps.append([(len(wps) + 1) * self.sampling_resolution / wps_length, 0])
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
-        lane_width = lane_center.lane_width
         right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
         if self.train_pdqn:
             t, fLcen = self.pdqn_lane_center(lane_center, self.ego_vehicle.get_location(), self.new_action)
@@ -708,19 +615,19 @@ class CarlaEnv:
         ego_vehicle_z = lane_center.transform.location.z
         ego_forward_vector = self.ego_vehicle.get_transform().get_forward_vector()
         my_sample_ratio = self.buffer_size // 10
-        center_wps_processed = self.process_lane_wp(lane_width, center_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 0, t)
+        center_wps_processed = process_lane_wp(center_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 0)
         if len(left_wps) == 0:
             left_wps_processed = center_wps_processed.copy()
             for left_wp in left_wps_processed:
                 left_wp[2] = -1
         else:
-            left_wps_processed = self.process_lane_wp(lane_width, left_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, -1, t)
+            left_wps_processed = process_lane_wp(left_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, -1)
         if len(right_wps) == 0:
             right_wps_processed = center_wps_processed.copy()
             for right_wp in right_wps_processed:
                 right_wp[2] = 1
         else:
-            right_wps_processed = self.process_lane_wp(lane_width, right_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 1, t)
+            right_wps_processed = process_lane_wp(right_wps, ego_vehicle_z, ego_forward_vector, my_sample_ratio, 1)
 
         left_wall = False
         if len(left_wps) == 0:
@@ -728,10 +635,10 @@ class CarlaEnv:
         right_wall = False
         if len(right_wps) == 0:
             right_wall = True
-        vehicle_inlane_processed = self.process_veh(
+        vehicle_inlane_processed = process_veh(self.ego_vehicle,
             [self.vehs_info.left_front_veh,self.vehs_info.center_front_veh,self.vehs_info.right_front_veh,
             self.vehs_info.left_rear_veh,self.vehs_info.center_rear_veh,self.vehs_info.right_rear_veh], 
-            lane_center, left_wall, right_wall)
+            left_wall, right_wall,self.vehicle_proximity)
         # if dict['vehicle_front']:
         #     vehicle_front = dict['vehicle_front']
         #     ego_speed = get_speed(self.ego_vehicle, False)
@@ -749,9 +656,6 @@ class CarlaEnv:
         # else:
         #     # No vehicle front, suppose there is a vehicle at the end of waypoint list and relative speed is 0
         #     vfl = [1, 0]
-
-        # ego vehicle information
-        # print('6')
 
         yaw_diff_ego = math.degrees(get_yaw_diff(lane_center.transform.get_forward_vector(),
                                                self.ego_vehicle.get_transform().get_forward_vector()))
@@ -774,7 +678,7 @@ class CarlaEnv:
         return {'left_waypoints': left_wps_processed, 'center_waypoints': center_wps_processed,
                 'right_waypoints': right_wps_processed, 'vehicle_info': vehicle_inlane_processed,
                 'ego_vehicle': [v_s/10, v_t/10, a_s/3, a_t/3, ego_t, yaw_diff_ego/90],
-                'light':[0,1] if self.lights_info else [1,0]}
+                'light':[0,1] if self.lights_info and self.lights_info.state==carla.TrafficLightState.Green else [1,0]}
 
     def calculate_lane_change_reward(self, last_action, last_lane, current_lane, current_action, distance_to_front_vehicles, distance_to_rear_vehicles):
         print('distance_to_front_vehicles, distance_to_rear_vehicles: ', distance_to_front_vehicles, distance_to_rear_vehicles)
@@ -1141,15 +1045,33 @@ class CarlaEnv:
         if self.step_info['Lane_center'] < -1.8:
             logging.warn('lane invasion occur')
             return True
+        if self.lights_info and self.lights_info.state!=carla.TrafficLightState.Green and \
+                is_within_distance_ahead(self.lights_info.get_location(),self.ego_vehicle.get_location(),
+                    self.ego_vehicle.get_transform(),self.min_distance):
+            logging.warn('break traffic light rule')
+            return True
 
         return False
 
     def _done(self):
-        if self.RL_switch and self.wps_info.center_front_wps[2].transform.location.distance(
-                self.ego_spawn_point.location) < self.sampling_resolution:
-            # The local planner's waypoint list has been depleted
-            logging.info('vehicle reach destination, simulation terminate')
-            return True
+        if self.RL_switch:
+            if self.wps_info.center_front_wps[2].transform.location.distance(
+                    self.ego_spawn_point.location) < self.sampling_resolution:
+                # The local planner's waypoint list has been depleted
+                logging.info('vehicle reach destination, simulation terminate')
+                return True
+            if self.wps_info.left_front_wps and \
+                    self.wps_info.left_front_wps[2].transform.location.distance(
+                    self.ego_spawn_point.location)<self.sampling_resolution:
+                 # The local planner's waypoint list has been depleted
+                logging.info('vehicle reach destination, simulation terminate')
+                return True
+            if self.wps_info.right_front_wps and \
+                    self.wps_info.right_front_wps[2].transform.location.distance(
+                    self.ego_spawn_point.location)<self.sampling_resolution:
+                # The local planner's waypoint list has been depleted
+                logging.info('vehicle reach destination, simulation terminate')
+                return True
         if not self.RL_switch:
             if self.time_step > 5000:
                 # Let the traffic manager only execute 5000 steps. or it can fill the replay buffer
@@ -1157,6 +1079,18 @@ class CarlaEnv:
                 return True
             if self.wps_info.center_front_wps[2].transform.location.distance(
                     self.ego_spawn_point.location) < self.sampling_resolution:
+                # The second next waypoints is close enough to the spawn point, route done
+                logging.info('vehicle reach destination under basic agent, simulation terminate')
+                return True
+            if self.wps_info.left_front_wps and \
+                    self.wps_info.left_front_wps[2].transform.location.distance(
+                    self.ego_spawn_point.location)<self.sampling_resolution:
+                # The second next waypoints is close enough to the spawn point, route done
+                logging.info('vehicle reach destination under basic agent, simulation terminate')
+                return True
+            if self.wps_info.right_front_wps and \
+                    self.wps_info.right_front_wps[2].transform.location.distance(
+                    self.ego_spawn_point.location)<self.sampling_resolution:
                 # The second next waypoints is close enough to the spawn point, route done
                 logging.info('vehicle reach destination under basic agent, simulation terminate')
                 return True
@@ -1348,7 +1282,7 @@ class CarlaEnv:
         # execute the command batch
         for (i, response) in enumerate(self.client.apply_batch_sync(command_batch, self.sync)):
             if response.has_error():
-                logging.error(response.error)
+                logging.warn(response.error)
             else:
                 # print("Future Actor",response.actor_id)
                 self.companion_vehicles.append(self.world.get_actor(response.actor_id))

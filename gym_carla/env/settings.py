@@ -1,7 +1,7 @@
 """This file defines all high level parameters of carla gym environment"""
 import argparse
 
-CARLA_PATH = 'D:\WindowsNoEditor'
+CARLA_PATH = 'D:\ProgramFiles\Carla\WindowsNoEditor'
 # the following road id sets define the chosen route
 ROADS = set()
 DISTURB_ROADS = set()
@@ -173,7 +173,7 @@ ARGS.add_argument(
 )
 ARGS.add_argument(
     '--pre_train_steps', type=int,
-    default=20000,
+    default=10000,
     help='Let the RL controller and PID controller alternatively take control every 500 steps'
 )
 ARGS.add_argument(
@@ -188,7 +188,7 @@ ARGS.add_argument(
 )
 ARGS.add_argument(
     '--min_distance',type=float,
-    default=2.0,
+    default=5.0,
     help='Min distance between two vehicles, unit -- meters'
 )
 ARGS.add_argument(

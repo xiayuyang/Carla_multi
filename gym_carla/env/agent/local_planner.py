@@ -43,19 +43,48 @@ class LocalPlanner:
 
     def run_step(self):
         waypoints_info = self._get_waypoints()
-        red_light=self._get_traffic_lights()
+        light=self._get_traffic_lights()
         vehicles_info=self._get_vehicles()
     
-        return WaypointWrapper(waypoints_info), red_light, VehicleWrapper(vehicles_info)
+        return WaypointWrapper(waypoints_info), light, VehicleWrapper(vehicles_info)
 
     def _get_traffic_lights(self):
-        # retrieve relevant elements for safe navigation, i.e.: traffic lights
+        """
+        This method is specialized to check US style traffic lights.
+
+        :param lights_list: list containing TrafficLight objects
+        :return: a tuple given by (bool_flag, traffic_light), where
+            - bool_flag is True if there is a traffic light in RED
+            affecting us and False otherwise
+            - traffic_light is the object itself or None if there is no
+            red traffic light affecting us
+        """
         lights_list=self._world.get_actors().filter("*traffic_light*")
+        ego_vehicle_location = self._vehicle.get_location()
+        ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
+        
+        sel_traffic_light = None
 
-        # check for the state of the traffic lights
-        light_state = self._is_light_red_us_style(lights_list)
+        if ego_vehicle_waypoint.is_junction:
+            # It is too late. Do not block the intersection! Keep going!
+            return self._last_traffic_light
 
-        return light_state
+        for traffic_light in lights_list:
+            loc=traffic_light.get_location()
+            min_angle = 100.0
+            magnitude, angle = compute_magnitude_angle(loc,ego_vehicle_location,
+                    self._vehicle.get_transform().rotation.yaw)
+            if magnitude < self.traffic_light_proximity and angle < min_angle:
+                sel_traffic_light = traffic_light
+                min_angle = angle
+                break
+
+        if sel_traffic_light is not None:
+            self._last_traffic_light = sel_traffic_light
+        else:
+            self._last_traffic_light = None
+
+        return self._last_traffic_light          
 
     def _get_vehicles(self):
         # retrieve relevant elements for safe navigation, i.e.: other vehicles
@@ -211,7 +240,7 @@ class LocalPlanner:
                 _waypoints_queue.append(next_waypoint)
             # delete an element from the left
             _waypoints_queue.popleft()
-        return _waypoints_queue
+        return list(_waypoints_queue)
 
     # def _get_waypoints(self):
     #     """
@@ -286,44 +315,7 @@ class LocalPlanner:
     #     #     print(wp.road_id,wp.lane_id,wp.s,wp.transform.location.distance(lane_center.transform.location),sep='\t')
 
     #     return waypoints
-
-    def _is_light_red_us_style(self, lights_list):
-        """
-        This method is specialized to check US style traffic lights.
-
-        :param lights_list: list containing TrafficLight objects
-        :return: a tuple given by (bool_flag, traffic_light), where
-            - bool_flag is True if there is a traffic light in RED
-            affecting us and False otherwise
-            - traffic_light is the object itself or None if there is no
-            red traffic light affecting us
-        """
-        ego_vehicle_location = self._vehicle.get_location()
-        ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
-
-        if ego_vehicle_waypoint.is_junction:
-            # It is too late. Do not block the intersection! Keep going!
-            return False
-
-        for traffic_light in lights_list:
-            loc=traffic_light.get_location()
-            min_angle = 180.0
-            sel_traffic_light = None
-            magnitude, angle = compute_magnitude_angle(loc,ego_vehicle_location,
-                self._vehicle.get_transform().rotation.yaw)
-            if magnitude < self.traffic_light_proximity and angle < min(25.0, min_angle):
-                        sel_traffic_light = traffic_light
-                        min_angle = angle
-            if sel_traffic_light is not None:
-                    if self._last_traffic_light is None:
-                        self._last_traffic_light = sel_traffic_light
-
-                    if self._last_traffic_light.state == carla.libcarla.TrafficLightState.Red:
-                        return True
-            else:
-                self._last_traffic_light = None
-        return False            
-
+        
     def _retrieve_options(self, list_waypoints, current_waypoint):
         """
         Compute the type of connection between the current active waypoint and the multiple waypoints present in
