@@ -167,11 +167,6 @@ ARGS.add_argument(
     default=1.0,
     help='Brake bound for ego vehicle controller')
 ARGS.add_argument(
-    '--switch_threshold', type=int,
-    default=1000000,
-    help='Let the TM controller control 1 episode after basic_agent controller control switch_threshold episodes'
-)
-ARGS.add_argument(
     '--pre_train_steps', type=int,
     default=10000,
     help='Let the RL controller and PID controller alternatively take control every 500 steps'

@@ -33,7 +33,6 @@ class LocalPlanner:
         self._target_road_option = RoadOption.LANEFOLLOW
         self._stop_waypoint_creation = False
 
-        self._last_traffic_light = None
         self.vehicle_proximity = opt_dict['vehicle_proximity']
         self.traffic_light_proximity = opt_dict['traffic_light_proximity']
 
@@ -67,7 +66,7 @@ class LocalPlanner:
 
         if ego_vehicle_waypoint.is_junction:
             # It is too late. Do not block the intersection! Keep going!
-            return self._last_traffic_light
+            return sel_traffic_light
 
         for traffic_light in lights_list:
             loc=traffic_light.get_location()
@@ -79,12 +78,7 @@ class LocalPlanner:
                 min_angle = angle
                 break
 
-        if sel_traffic_light is not None:
-            self._last_traffic_light = sel_traffic_light
-        else:
-            self._last_traffic_light = None
-
-        return self._last_traffic_light          
+        return sel_traffic_light         
 
     def _get_vehicles(self):
         # retrieve relevant elements for safe navigation, i.e.: other vehicles

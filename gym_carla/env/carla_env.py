@@ -34,8 +34,6 @@ class SpeedState(Enum):
     RUNNING = 1
     RUNNING_RL = 2
     RUNNING_PID = 3
-    REBOOT = 4
-
 
 class CarlaEnv:
     def __init__(self, args, train_pdqn=False, modify_change_steer=False, remove_lane_center_in_change=False) -> None:
@@ -94,14 +92,9 @@ class CarlaEnv:
         self.total_step = 0
         self.time_step = 0
         self.rl_control_step = 0
-        self.rl_control_episode = 0
-        self.tm_control_episode = 0
         # Let the RL controller and PID controller alternatively take control every 500 steps
         # RL_switch: True--currently RL in control, False--currently PID in control
-        # TM_switch: True--currently traffic manager in control, False--currently Basic Agent in control
         self.RL_switch = False
-        self.TM_switch = False
-        self.SWITCH_THRESHOLD = args.switch_threshold
 
         self.lights_info=None
         self.wps_info=WaypointWrapper()
@@ -290,36 +283,10 @@ class CarlaEnv:
 
         # speed state switch
         if not self.debug:
-            if not self.RL_switch and self.total_step < self.pre_train_steps:
-                if not self.TM_switch:
-                    if self.tm_control_episode == self.SWITCH_THRESHOLD:
-                        self.TM_switch = True
-                        self.tm_control_episode = 0
-                        self.world.debug.draw_point(self.ego_spawn_point.location, size=0.2, life_time=300)
-                    else:
-                        self.tm_control_episode += 1
-                else:
-                    self.TM_switch = False
-                    self.tm_control_episode += 1
-                # if self.RL_switch:
-                #     if self.rl_control_episode == self.SWITCH_THRESHOLD:
-                #         self.RL_switch = False
-                #         self.rl_control_episode = 0
-                #         self.world.debug.draw_point(self.ego_spawn_point.location, size=0.2, life_time=0)
-                #     else:
-                #         self.rl_control_episode += 1
-                #         # self.local_planner.set_global_plan(self.global_planner.get_route(
-                #         #     self.map.get_waypoint(self.ego_vehicle.get_location())))
-                # else:
-                #     self.RL_switch = True
-                #     self.rl_control_episode += 1
-                #     # self.local_planner.set_global_plan(self.global_planner.get_route(
-                #     #     self.map.get_waypoint(self.ego_vehicle.get_location())))
+            if self.total_step <self.pre_train_steps:
+                self.RL_switch=False
             else:
-                self.RL_switch = True
-                self.TM_switch = False
-                # self.local_planner.set_global_plan(self.global_planner.get_route(
-                #     self.map.get_waypoint(self.ego_vehicle.get_location())))
+                self.RL_switch=True
         else:
             # self.autopilot_controller.set_destination(random.choice(self.spawn_points).location)
             # self.autopilot_controller.set_destination(self.my_set_destination())
@@ -397,7 +364,7 @@ class CarlaEnv:
             self.last_action = self.new_action
         if self.sync:
             if not self.debug:
-                if not self.RL_switch and not self.TM_switch:
+                if not self.RL_switch :
                     # Add noise to autopilot controller's control command
                     # print(f"Basic Agent Control Before Noise:{control}")
                     if not self.modify_change_steer:
@@ -424,7 +391,7 @@ class CarlaEnv:
                     else:
                         control.throttle = 0
                         control.brake = abs(throttle_brake)
-                if self.is_effective_action() and not self.TM_switch:
+                if self.is_effective_action():
                     self.ego_vehicle.apply_control(control)
             else:
                 #control.steer = np.clip(np.random.normal(control.steer,self.control_sigma['Steer']),-self.steer_bound,self.steer_bound)
@@ -460,8 +427,10 @@ class CarlaEnv:
             # route planner
             # self.next_wps, _, self.vehicle_front = self.local_planner.run_step()
             self.wps_info, self.lights_info, self.vehs_info = self.local_planner.run_step()
+            l_c=self.map.get_waypoint(self.ego_vehicle.get_location())
             print(f"Light State: {self.lights_info.state if self.lights_info else None}, "
-                    f"Cur Road ID: {lane_center.road_id}, Cur Lane ID: {lane_center.lane_id}")
+                    f"Cur Road ID: {lane_center.road_id}, Cur Lane ID: {lane_center.lane_id}, "
+                    f"Before Process Road ID: {l_c.road_id}, Lane ID: {l_c.lane_id}")
 
             if self.debug:
                 # run the ego vehicle with PID_controller
@@ -511,8 +480,8 @@ class CarlaEnv:
 
         if self.debug:
             print(f"Speed:{get_speed(self.ego_vehicle, False)}, Acc:{get_acceleration(self.ego_vehicle, False)}")
-        print(f"Current State:{self.speed_state}, RL In Control:{self.RL_switch}, TM In Control:{self.TM_switch}")
-        if not self.RL_switch and not self.TM_switch:
+        print(f"Current State:{self.speed_state}, RL In Control:{self.RL_switch}")
+        if not self.RL_switch:
             print(f"Control Sigma -- Steer:{self.control_sigma['Steer']}, Throttle_brake:{self.control_sigma['Throttle_brake']}")
         if self.is_effective_action():
             # update timesteps
@@ -569,7 +538,7 @@ class CarlaEnv:
 
     def is_effective_action(self):
         # testing if current ego vehcle's action should be put into replay buffer
-        return self.speed_state == SpeedState.REBOOT or self.speed_state == SpeedState.RUNNING
+        return self.speed_state == SpeedState.RUNNING
 
     def seed(self, seed=None):
         return
@@ -943,29 +912,23 @@ class CarlaEnv:
             # control = self.controller.run_step({'waypoints':self.next_wps,'vehicle_front':self.vehicle_front})
             if ego_speed >= self.speed_threshold:
                 self.speed_state = SpeedState.RUNNING
+                self._ego_autopilot(False)
                 if not self.RL_switch:
-                    if self.TM_switch:
-                        # Under traffic manager control
-                        self._ego_autopilot(True)
-                    else:
-                        # Under basic agent control
-                        self._ego_autopilot(False)
-                        # self.autopilot_controller.set_destination(random.choice(self.spawn_points).location)
-                        # if self.autopilot_controller.done() and self.loop:
-                        #     self.autopilot_controller.set_destination(self.my_set_destination())
-                        # control = self.autopilot_controller.run_step()
-                        print("basic_lanechanging_agent: last_lane, current lane, target lane, new_target_lane, last action, new action: ",
-                              self.last_lane, self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
-                              self.new_action)
-                        control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
-                            self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1, self.modify_change_steer)
-                        print("basic_lanechanging_agent: last_lane, current lane, target lane, new_target_lane, last action, new action: ",
-                              self.last_lane, self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
-                              self.new_action)
-                        self.target_lane = self.new_target_lane
-                        self.last_action = self.new_action
-                else:
-                    self._ego_autopilot(False)
+                    # Under basic lanechange agent control
+                    # self.autopilot_controller.set_destination(random.choice(self.spawn_points).location)
+                    # if self.autopilot_controller.done() and self.loop:
+                    #     self.autopilot_controller.set_destination(self.my_set_destination())
+                    # control = self.autopilot_controller.run_step()
+                    print("basic_lanechanging_agent: last_lane, current lane, target lane, new_target_lane, last action, new action: ",
+                        self.last_lane, self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
+                        self.new_action)
+                    control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
+                        self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1, self.modify_change_steer)
+                    print("basic_lanechanging_agent: last_lane, current lane, target lane, new_target_lane, last action, new action: ",
+                        self.last_lane, self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
+                        self.new_action)
+                    self.target_lane = self.new_target_lane
+                    self.last_action = self.new_action
             else:
                 print("initial: last_lane, current lane, target lane, new_target_lane, last action, new action: ",
                       self.last_lane, self.current_lane, self.target_lane, self.new_target_lane, self.last_action,
@@ -989,30 +952,21 @@ class CarlaEnv:
                     #self.speed_state = SpeedState.REBOOT
                     pass
             else:
-                if self.TM_switch:
-                    #Under traffic manager control
-                    pass
-                else:
-                    #Under basic agent control
-                    # if self.autopilot_controller.done() and self.loop:
-                    #     # self.autopilot_controller.set_destination(random.choice(self.spawn_points).location)
-                    #     self.autopilot_controller.set_destination(self.my_set_destination())
-                    # control=self.autopilot_controller.run_step()
-                    print("basic_lanechanging_agent: last_lane, current lane, target lane, new_target_lane, last action, new action: ",
-                          self.last_lane, self.current_lane,
-                          self.target_lane, self.new_target_lane, self.last_action, self.new_action)
-                    control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
-                        self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1, self.modify_change_steer)
-                    print("basic_lanechanging_agent: last_lane, current lane, target lane, new_target_lane, last action, new action: ",
-                          self.last_lane, self.current_lane,
-                          self.target_lane, self.new_target_lane, self.last_action, self.new_action)
-                    self.target_lane = self.new_target_lane
-                    self.last_action = self.new_action
-        elif self.speed_state == SpeedState.REBOOT:
-            control = self.controller.run_step({'waypoints': self.next_wps, 'vehicle_front': self.vehicle_front})
-            if ego_speed >= self.speed_threshold:
-                # self._ego_autopilot(False)
-                self.speed_state = SpeedState.RUNNING
+                #Under basic lane change agent control
+                # if self.autopilot_controller.done() and self.loop:
+                #     # self.autopilot_controller.set_destination(random.choice(self.spawn_points).location)
+                #     self.autopilot_controller.set_destination(self.my_set_destination())
+                # control=self.autopilot_controller.run_step()
+                print("basic_lanechanging_agent: last_lane, current lane, target lane, new_target_lane, last action, new action: ",
+                        self.last_lane, self.current_lane,
+                        self.target_lane, self.new_target_lane, self.last_action, self.new_action)
+                control, self.new_target_lane, self.new_action, self.distance_to_front_vehicles, self.distance_to_rear_vehicles = \
+                    self.autopilot_controller.run_step(self.current_lane, self.target_lane, self.last_action, False, 1, self.modify_change_steer)
+                print("basic_lanechanging_agent: last_lane, current lane, target lane, new_target_lane, last action, new action: ",
+                        self.last_lane, self.current_lane,
+                        self.target_lane, self.new_target_lane, self.last_action, self.new_action)
+                self.target_lane = self.new_target_lane
+                self.last_action = self.new_action
         else:
             logging.error('CODE LOGIC ERROR')
 
@@ -1037,7 +991,7 @@ class CarlaEnv:
         # if self.lane_invasion_sensor.get_invasion_count()!=0:
         #     logging.warn('lane invasion occur')
         #     return True
-        if not test_waypoint(get_lane_center(self.map,self.ego_vehicle.get_location())):
+        if self.step_info['Lane_center'] <=-2.0:
             logging.warn('drive out of road, lane invasion occur')
             return True
         if self.step_info['Yaw'] < -1.0:
@@ -1052,10 +1006,12 @@ class CarlaEnv:
         return False
 
     def _done(self):
+        if self._truncated():
+            return False
         if self.wps_info.center_front_wps[2].transform.location.distance(
-                self.ego_spawn_point.location) < self.sampling_resolution:
+                self.ego_spawn_point.location) < self.sampling_resolution:          
             # The local planner's waypoint list has been depleted
-            logging.info('vehicle reach destination, simulation terminate')
+            logging.info('vehicle reach destination, simulation terminate')                                 
             return True
         if self.wps_info.left_front_wps and \
                 self.wps_info.left_front_wps[2].transform.location.distance(
