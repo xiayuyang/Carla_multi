@@ -18,7 +18,7 @@ from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper,process_la
     process_action,recovery_action,fill_action_param
 from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
     compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
-    get_trafficlight_trigger_location, is_within_distance, get_sign,is_within_distance_ahead
+    get_trafficlight_trigger_location, is_within_distance, get_sign,is_within_distance_ahead,get_projection
 
 FOLLOW = 0
 CHANGE_LEFT = -1
@@ -137,7 +137,7 @@ class CarlaEnv:
         # arguments for caculating reward
         self.TTC_THRESHOLD = args.TTC_th
         self.penalty = args.penalty
-        self.last_acc = 0  # ego vehicle acceration in last step
+        self.last_acc = 0  # ego vehicle acceration along s in last step
         self.last_yaw = carla.Vector3D()
         self.rear_vel_deque = deque(maxlen=2)
         self.step_info = None
@@ -153,6 +153,7 @@ class CarlaEnv:
         # self.world.set_weather(carla.WeatherParamertes.ClearNoon)
 
         self.companion_vehicles = []
+        self.vehicle_polygons = []
         self.ego_vehicle = None
         # the vehicle in front of ego vehicle
         self.vehicle_front = None
@@ -180,7 +181,8 @@ class CarlaEnv:
             self._clear_actors(
                 ['*vehicle.*', 'sensor.other.collison', 'sensor.camera.rgb', 'sensor.other.lane_invasion'])
             self.ego_vehicle = None
-            self.companion_vehicles = []
+            self.vehicle_polygons.clear()
+            self.companion_vehicles.clear()
             self.collision_sensor = None
             self.lane_invasion_sensor = None
             self.camera = None
@@ -193,7 +195,6 @@ class CarlaEnv:
         self.rear_vel_deque.append(-1)
         self.rear_vel_deque.append(-1)
         # Get actors polygon list
-        self.vehicle_polygons = []
         vehicle_poly_dict = get_actor_polygons(self.world, 'vehicle.*')
         self.vehicle_polygons.append(vehicle_poly_dict)
 
@@ -493,7 +494,8 @@ class CarlaEnv:
             self.step_info.update({'Reward': reward})
             lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
             yaw_forward = lane_center.transform.get_forward_vector().make_unit_vector()
-            self.last_acc = self.get_acc_s(self.ego_vehicle.get_acceleration(), yaw_forward)
+            a_3d=self.ego_vehicle.get_acceleration()
+            self.last_acc,a_t=get_projection(a_3d,yaw_forward)
             self.last_yaw = self.ego_vehicle.get_transform().get_forward_vector()
         else:
             temp = self.world.wait_for_tick()
@@ -662,15 +664,10 @@ class CarlaEnv:
 
         yaw_forward = lane_center.transform.get_forward_vector()
         v_3d = self.ego_vehicle.get_velocity()
-        theta_v = get_yaw_diff(v_3d, yaw_forward)
-        v_s = v_3d.length() * math.cos(theta_v)
-        v_t = v_3d.length() * math.sin(theta_v)
-        # v_t1=v_3d.length()*math.cos(alpha_v)
+        v_s,v_t=get_projection(v_3d,yaw_forward)
 
         a_3d = self.ego_vehicle.get_acceleration()
-        theta_a = get_yaw_diff(a_3d, yaw_forward)
-        a_s = a_3d.length() * math.cos(theta_a)
-        a_t = a_3d.length() * math.sin(theta_a)
+        a_s,a_t=get_projection(a_3d,yaw_forward)
 
         """Attention:
         Upon initializing, there are some bugs in the theta_v and theta_a, which could be greater than 90,
@@ -762,7 +759,8 @@ class CarlaEnv:
         else:
             fEff = v_s * 3.6 / self.speed_limit
 
-        cur_acc = self.get_acc_s(self.ego_vehicle.get_acceleration(), yaw_forward)
+        a_3d=self.ego_vehicle.get_acceleration()
+        cur_acc,a_t=get_projection(a_3d,yaw_forward)
 
         fCom, yaw_change = self.compute_comfort(self.last_acc, cur_acc, self.last_yaw, self.ego_vehicle.get_transform().get_forward_vector())
         # jerk = (cur_acc.x - self.last_acc.x) ** 2 / (1.0 / self.fps) + (cur_acc.y - self.last_acc.y) ** 2 / (
@@ -825,16 +823,6 @@ class CarlaEnv:
                 return - self.penalty
         else:
             return fTTC+fEff + fCom + fLcen + lane_changing_reward
-
-    def get_acc_s(self, acc, yaw_forward):
-        acc.z = 0
-        if acc.length() != 0.0:
-            theta_acc = math.acos(np.clip(acc.dot(yaw_forward) / (acc.length() * yaw_forward.length()), -1, 1))
-            # alpha_v = math.acos(np.clip(v_3d.dot(yaw_right)/(v_3d.length()*yaw_right.length()),-1,1))
-        else:
-            theta_acc = math.acos(0)
-        acc_s = acc.length() * math.cos(theta_acc)
-        return acc_s
 
     def pdqn_lane_center(self, lane_center, ego_location, action):
         def compute(center,ego):
@@ -1042,8 +1030,8 @@ class CarlaEnv:
         # if self.lane_invasion_sensor.get_invasion_count()!=0:
         #     logging.warn('lane invasion occur')
         #     return True
-        if self.step_info['Lane_center'] < -1.8:
-            logging.warn('lane invasion occur')
+        if not test_waypoint(get_lane_center(self.map,self.ego_vehicle.get_location())):
+            logging.warn('drive out of road, lane invasion occur')
             return True
         if self.step_info['Yaw'] < -1.0:
             logging.warn('moving in the opposite direction')
@@ -1057,45 +1045,27 @@ class CarlaEnv:
         return False
 
     def _done(self):
-        if self.RL_switch:
-            if self.wps_info.center_front_wps[2].transform.location.distance(
-                    self.ego_spawn_point.location) < self.sampling_resolution:
-                # The local planner's waypoint list has been depleted
-                logging.info('vehicle reach destination, simulation terminate')
-                return True
-            if self.wps_info.left_front_wps and \
-                    self.wps_info.left_front_wps[2].transform.location.distance(
-                    self.ego_spawn_point.location)<self.sampling_resolution:
-                 # The local planner's waypoint list has been depleted
-                logging.info('vehicle reach destination, simulation terminate')
-                return True
-            if self.wps_info.right_front_wps and \
-                    self.wps_info.right_front_wps[2].transform.location.distance(
-                    self.ego_spawn_point.location)<self.sampling_resolution:
-                # The local planner's waypoint list has been depleted
-                logging.info('vehicle reach destination, simulation terminate')
-                return True
+        if self.wps_info.center_front_wps[2].transform.location.distance(
+                self.ego_spawn_point.location) < self.sampling_resolution:
+            # The local planner's waypoint list has been depleted
+            logging.info('vehicle reach destination, simulation terminate')
+            return True
+        if self.wps_info.left_front_wps and \
+                self.wps_info.left_front_wps[2].transform.location.distance(
+                self.ego_spawn_point.location)<self.sampling_resolution:
+            # The local planner's waypoint list has been depleted
+            logging.info('vehicle reach destination, simulation terminate')
+            return True
+        if self.wps_info.right_front_wps and \
+                self.wps_info.right_front_wps[2].transform.location.distance(
+                self.ego_spawn_point.location)<self.sampling_resolution:
+            # The local planner's waypoint list has been depleted
+            logging.info('vehicle reach destination, simulation terminate')
+            return True
         if not self.RL_switch:
             if self.time_step > 5000:
                 # Let the traffic manager only execute 5000 steps. or it can fill the replay buffer
                 logging.info('5000 steps passed under traffic manager control')
-                return True
-            if self.wps_info.center_front_wps[2].transform.location.distance(
-                    self.ego_spawn_point.location) < self.sampling_resolution:
-                # The second next waypoints is close enough to the spawn point, route done
-                logging.info('vehicle reach destination under basic agent, simulation terminate')
-                return True
-            if self.wps_info.left_front_wps and \
-                    self.wps_info.left_front_wps[2].transform.location.distance(
-                    self.ego_spawn_point.location)<self.sampling_resolution:
-                # The second next waypoints is close enough to the spawn point, route done
-                logging.info('vehicle reach destination under basic agent, simulation terminate')
-                return True
-            if self.wps_info.right_front_wps and \
-                    self.wps_info.right_front_wps[2].transform.location.distance(
-                    self.ego_spawn_point.location)<self.sampling_resolution:
-                # The second next waypoints is close enough to the spawn point, route done
-                logging.info('vehicle reach destination under basic agent, simulation terminate')
                 return True
 
         return False

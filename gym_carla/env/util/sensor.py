@@ -52,6 +52,10 @@ class CollisionSensor(object):
         weak_ref = weakref.ref(self)
         self.sensor.listen(lambda event: CollisionSensor._on_collision(weak_ref, event))
 
+    def __del__(self):
+        self.history.clear()
+        self.sensor=None
+
     def get_collision_history(self):
         """Get the histroy of collisions"""
         history = collections.defaultdict(int)
@@ -94,6 +98,10 @@ class LaneInvasionSensor(object):
         # reference.
         weak_self = weakref.ref(self)
         self.sensor.listen(lambda event: LaneInvasionSensor._on_invasion(weak_self, event))
+
+    def __del__(self):
+        self.count=0
+        self.sensor=None
 
     def get_invasion_count(self):
         return self.count

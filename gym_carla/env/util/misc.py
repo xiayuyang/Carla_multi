@@ -166,6 +166,20 @@ def get_yaw_diff(vector1,vector2):
         theta = 0
     return theta_sign*theta
 
+def get_projection(vector1,vector2):
+    """
+    Return the projection of vector1 on vector2,
+    proj_s is horizontal projection, proj_t is vertical projection
+    vector1 and vector2 should be carla.Vector3D type
+    """
+    # vector1.z=0
+    # vector2.z=0
+    theta=get_yaw_diff(vector1,vector2)
+    proj_s=vector1.length()*math.cos(theta)
+    proj_t=vector1.length()*math.sin(theta)
+
+    return proj_s,proj_t
+
 def get_sign(vector1,vector2):
     """negative value means vector1 is on the left of vector2, positive is on the right of vector2.
     The vector format should be carla.Vector3D, and we set the vectors' z value to 0 because of the map been working on."""
