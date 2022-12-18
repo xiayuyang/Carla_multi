@@ -74,8 +74,12 @@ class LocalPlanner:
             magnitude, angle = compute_magnitude_angle(loc,ego_vehicle_location,
                     self._vehicle.get_transform().rotation.yaw)
             if magnitude < self.traffic_light_proximity and angle < min_angle:
-                sel_traffic_light = traffic_light
-                min_angle = angle
+                wps=traffic_light.get_affected_lane_waypoints()
+                for wp in wps:
+                    if test_waypoint(wp,False):
+                        sel_traffic_light = traffic_light
+                        min_angle = angle
+                        break
                 break
 
         return sel_traffic_light         

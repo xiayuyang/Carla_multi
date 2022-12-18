@@ -9,9 +9,7 @@ from queue import Queue
 from collections import deque
 #from gym_carla.env.agent.basic_agent import BasicAgent
 from gym_carla.env.agent.local_planner import LocalPlanner
-from gym_carla.env.agent.global_planner import GlobalPlanner
-from gym_carla.env.agent.pid_controller import VehiclePIDController
-from gym_carla.env.carla.behavior_agent import BehaviorAgent, BasicAgent
+from gym_carla.env.agent.global_planner import GlobalPlanner,RoadOption
 from gym_carla.env.agent.basic_lanechanging_agent import Basic_Lanechanging_Agent
 from gym_carla.env.util.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
 from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper,process_lane_wp,process_veh, \
@@ -148,10 +146,6 @@ class CarlaEnv:
         self.companion_vehicles = []
         self.vehicle_polygons = []
         self.ego_vehicle = None
-        # the vehicle in front of ego vehicle
-        self.vehicle_front = None
-        self.vehicle_rear = None
-        self.vehicle_inlane = None
 
         # Collision sensor
         self.collision_sensor = None
@@ -428,6 +422,10 @@ class CarlaEnv:
             # self.next_wps, _, self.vehicle_front = self.local_planner.run_step()
             self.wps_info, self.lights_info, self.vehs_info = self.local_planner.run_step()
             l_c=self.map.get_waypoint(self.ego_vehicle.get_location())
+            # marks=lane_center.get_landmarks(self.traffic_light_proximity)
+            # if marks:
+            #     for mark in marks: 
+            #         print(f"Mark Road ID:{mark.road_id}, distance:{mark.distance}, name:{mark.distance}")
             print(f"Light State: {self.lights_info.state if self.lights_info else None}, "
                     f"Cur Road ID: {lane_center.road_id}, Cur Lane ID: {lane_center.lane_id}, "
                     f"Before Process Road ID: {l_c.road_id}, Lane ID: {l_c.lane_id}")
@@ -651,7 +649,8 @@ class CarlaEnv:
         return {'left_waypoints': left_wps_processed, 'center_waypoints': center_wps_processed,
                 'right_waypoints': right_wps_processed, 'vehicle_info': vehicle_inlane_processed,
                 'ego_vehicle': [v_s/10, v_t/10, a_s/3, a_t/3, ego_t, yaw_diff_ego/90],
-                'light':[0,1] if self.lights_info and self.lights_info.state==carla.TrafficLightState.Green else [1,0]}
+                'light':[0,1] if self.lights_info and (self.lights_info.state==carla.TrafficLightState.Red or \
+                    self.lights_info.state==carla.TrafficLightState.Yellow) else [1,0]}
 
     def calculate_lane_change_reward(self, last_action, last_lane, current_lane, current_action, distance_to_front_vehicles, distance_to_rear_vehicles):
         print('distance_to_front_vehicles, distance_to_rear_vehicles: ', distance_to_front_vehicles, distance_to_rear_vehicles)
@@ -699,16 +698,16 @@ class CarlaEnv:
         # print('7')
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
         TTC = float('inf')
-        if self.vehicle_front:
-            distance = self.ego_vehicle.get_location().distance(self.vehicle_front.get_location())
+        if self.vehs_info.center_front_veh:
+            distance = self.ego_vehicle.get_location().distance(self.vehs_info.center_front_veh.get_location())
             vehicle_len = max(abs(self.ego_vehicle.bounding_box.extent.x),abs(self.ego_vehicle.bounding_box.extent.y)) + \
-                max(abs(self.vehicle_front.bounding_box.extent.x),abs(self.vehicle_front.bounding_box.extent.y))
+                max(abs(self.vehs_info.center_front_veh.bounding_box.extent.x),abs(self.vehs_info.center_front_veh.bounding_box.extent.y))
             distance -= vehicle_len
             if distance < self.min_distance:
                 TTC = 0.01
             else:
                 distance -= self.min_distance
-                rel_speed = ego_speed / 3.6 - get_speed(self.vehicle_front, False)
+                rel_speed = ego_speed / 3.6 - get_speed(self.vehs_info.center_front_veh, False)
                 if abs(rel_speed) > float(0.0000001):
                     TTC = distance / rel_speed
             #print(distance, TTC)
@@ -720,20 +719,20 @@ class CarlaEnv:
 
         yaw_forward = lane_center.transform.get_forward_vector().make_unit_vector()
         v_3d = self.ego_vehicle.get_velocity()
-        # ignore z value
-        v_3d.z = 0
-        if v_3d.length() != 0.0:
-            theta_v = math.acos(np.clip(v_3d.dot(yaw_forward) / (v_3d.length() * yaw_forward.length()), -1, 1))
-            # alpha_v = math.acos(np.clip(v_3d.dot(yaw_right)/(v_3d.length()*yaw_right.length()),-1,1))
-        else:
-            theta_v = math.acos(0)
-            # alpha_v=math.acos(0)
-        v_s = v_3d.length() * math.cos(theta_v)
-        if v_s * 3.6 > self.speed_limit:
+        v_s,v_t=get_projection(v_3d,yaw_forward)
+        distance=max(self.vehicle_proximity,self.traffic_light_proximity)
+        if self.vehs_info.center_front_veh:
+            distance = self.ego_vehicle.get_location().distance(self.vehs_info.center_front_veh.get_location())
+        if self.lights_info:
+            dis=self.ego_vehicle.get_location().distance(self.lights_info.get_location())
+            if dis<distance:
+                distance=dis
+        max_speed=(distance+0.0001)/max(self.vehicle_proximity,self.traffic_light_proximity)*self.speed_limit
+        if v_s * 3.6 > max_speed:
             # fEff = 1
-            fEff = math.exp(self.speed_limit - v_s * 3.6)
+            fEff = math.exp(max_speed - v_s * 3.6)
         else:
-            fEff = v_s * 3.6 / self.speed_limit
+            fEff = v_s * 3.6 / max_speed
 
         a_3d=self.ego_vehicle.get_acceleration()
         cur_acc,a_t=get_projection(a_3d,yaw_forward)
@@ -881,18 +880,18 @@ class CarlaEnv:
     def calculate_rear_ttc_reward(self):
         ego_speed = get_speed(self.ego_vehicle, True)
         TTC = float('inf')
-        if self.vehicle_rear:
-            distance = self.ego_vehicle.get_location().distance(self.vehicle_rear.get_location())
+        if self.vehs_info.center_rear_veh:
+            distance = self.ego_vehicle.get_location().distance(self.vehs_info.center_rear_veh.get_location())
             vehicle_len = max(abs(self.ego_vehicle.bounding_box.extent.x),
                               abs(self.ego_vehicle.bounding_box.extent.y)) + \
-                          max(abs(self.vehicle_rear.bounding_box.extent.x),
-                              abs(self.vehicle_rear.bounding_box.extent.y))
+                          max(abs(self.vehs_info.center_rear_veh.bounding_box.extent.x),
+                              abs(self.vehs_info.center_rear_veh.bounding_box.extent.y))
             distance -= vehicle_len
             if distance < self.min_distance:
                 TTC = 0.01
             else:
                 distance -= self.min_distance
-                rel_speed = get_speed(self.vehicle_rear, False) - ego_speed / 3.6
+                rel_speed = get_speed(self.vehs_info.center_rear_veh, False) - ego_speed / 3.6
                 if abs(rel_speed) > float(0.0000001):
                     TTC = distance / rel_speed
             # print(distance, TTC)
@@ -997,11 +996,15 @@ class CarlaEnv:
         if self.step_info['Yaw'] < -1.0:
             logging.warn('moving in the opposite direction')
             return True
-        if self.lights_info and self.lights_info.state!=carla.TrafficLightState.Green and \
-                is_within_distance_ahead(self.lights_info.get_location(),self.ego_vehicle.get_location(),
-                    self.ego_vehicle.get_transform(),self.min_distance):
-            logging.warn('break traffic light rule')
-            return True
+        if self.lights_info and self.lights_info.state!=carla.TrafficLightState.Green:
+            self.world.debug.draw_point(self.lights_info.get_location(),size=0.3,life_time=0)
+            wps=self.lights_info.get_stop_waypoints()
+            for wp in wps:
+                self.world.debug.draw_point(wp.transform.location,size=0.1,life_time=0)
+                if wp.transform.location.distance(self.ego_vehicle.get_location())<=self.min_distance and \
+                        get_speed(self.ego_vehicle, False) > 0.1:
+                    logging.warn('break traffic light rule')
+                    return True
 
         return False
 

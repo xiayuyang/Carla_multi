@@ -19,7 +19,7 @@ def remove_unnecessary_objects(world):
     world.unload_map_layer(carla.MapLayer.ParkedVehicles)
     # world.unload_map_layer(carla.MapLayer.Particles)
     world.unload_map_layer(carla.MapLayer.Ground)
-    labels=[carla.CityObjectLabel.TrafficSigns,carla.CityObjectLabel.TrafficLight,carla.CityObjectLabel.Other,
+    labels=[carla.CityObjectLabel.TrafficSigns,carla.CityObjectLabel.Other,
         carla.CityObjectLabel.Poles, carla.CityObjectLabel.Static,carla.CityObjectLabel.Dynamic,carla.CityObjectLabel.Buildings,
         carla.CityObjectLabel.Fences, carla.CityObjectLabel.Walls,carla.CityObjectLabel.Vegetation,carla.CityObjectLabel.Ground]
     objs = set()
@@ -163,7 +163,7 @@ def get_yaw_diff(vector1,vector2):
         theta = math.acos(
             np.clip(vector1.dot(vector2)/(vector1.length()*vector2.length()), -1, 1))
     else:
-        theta = 0
+        theta = math.acos(0)
     return theta_sign*theta
 
 def get_projection(vector1,vector2):
