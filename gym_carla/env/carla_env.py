@@ -197,6 +197,12 @@ class CarlaEnv:
         # Get actors polygon list
         vehicle_poly_dict = get_actor_polygons(self.world, 'vehicle.*')
         self.vehicle_polygons.append(vehicle_poly_dict)
+                #set traffic light elpse time
+        lights_list=self.world.get_actors().filter("*traffic_light*")
+        for light in lights_list:
+            light.set_green_time(10)
+            light.set_red_time(5)
+            light.set_yellow_time(0)
 
         # try to spawn ego vehicle
         while self.ego_vehicle is None:
@@ -445,15 +451,17 @@ class CarlaEnv:
             # print()
             # if self.is_effective_action():
             control = self.ego_vehicle.get_control()
+            lane_center=get_lane_center(self.map,self.ego_vehicle.get_location())
             print("steering, throttle, brake, change: ", control, self.new_action)
             self.last_lane = self.current_lane
             # print('4')
-            self.current_lane = get_lane_center(self.map, self.ego_vehicle.get_location()).lane_id
+            self.current_lane = lane_center.lane_id
             # print(self.ego_vehicle.get_speed_limit(),get_speed(self.ego_vehicle,False),get_acceleration(self.ego_vehicle,False),sep='\t')
             # route planner
             # self.next_wps, _, self.vehicle_front = self.local_planner.run_step()
             self.wps_info, self.lights_info, self.vehs_info = self.local_planner.run_step()
-            print(f"Light State: {self.lights_info.state if self.lights_info else None}")
+            print(f"Light State: {self.lights_info.state if self.lights_info else None}, "
+                    f"Cur Road ID: {lane_center.road_id}, Cur Lane ID: {lane_center.lane_id}")
 
             if self.debug:
                 # run the ego vehicle with PID_controller
@@ -492,7 +500,6 @@ class CarlaEnv:
             reward = self._get_reward(self.last_action, self.last_lane, self.current_lane, self.distance_to_front_vehicles, self.distance_to_rear_vehicles)
             state = self._get_state()
             self.step_info.update({'Reward': reward})
-            lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
             yaw_forward = lane_center.transform.get_forward_vector().make_unit_vector()
             a_3d=self.ego_vehicle.get_acceleration()
             self.last_acc,a_t=get_projection(a_3d,yaw_forward)
@@ -1180,13 +1187,6 @@ class CarlaEnv:
         # Let the companion vehicles drive a bit faster than ego speed limit
         self.traffic_manager.global_percentage_speed_difference(-100)
         self.traffic_manager.set_synchronous_mode(self.sync)
-
-        #set traffic light elpse time
-        lights_list=self.world.get_actors().filter("*traffic_light*")
-        for light in lights_list:
-            light.set_green_time(10)
-            light.set_red_time(5)
-            light.set_yellow_time(0)
 
     def _try_spawn_ego_vehicle_at(self, transform):
         """Try to spawn a  vehicle at specific transform
