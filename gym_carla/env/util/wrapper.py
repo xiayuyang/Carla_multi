@@ -1,5 +1,6 @@
 import math
 import numpy as np
+from enum import Enum
 from gym_carla.env.util.misc import get_speed,get_yaw_diff
 
 class WaypointWrapper:
@@ -65,6 +66,12 @@ class VehicleWrapper:
             if 'right_rear_veh' in opt:
                 VehicleWrapper.right_rear_veh=opt['right_rear_veh']
 
+class ActionWrapper(Enum):
+    """Parametrized Action for P-DQN"""
+    LANE_CHANGE_LEFT=-1
+    LANE_FOLLOW=0
+    LANE_CHANGE_RIGHT=1
+    STOP=2
 
 def process_lane_wp(wps_list, ego_vehicle_z, ego_forward_vector, my_sample_ratio, lane_offset):
     wps = []
