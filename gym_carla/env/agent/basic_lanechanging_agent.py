@@ -15,9 +15,10 @@ import numpy as np
 from enum import Enum
 from collections import deque
 from shapely.geometry import Polygon
-
-from gym_carla.env.util.misc import get_speed, draw_waypoints, is_within_distance, get_trafficlight_trigger_location, compute_distance, get_lane_center
+from gym_carla.env.util.wrapper import Action
 from gym_carla.env.agent.pid_controller import VehiclePIDController
+from gym_carla.env.util.misc import get_speed, draw_waypoints, is_within_distance, get_trafficlight_trigger_location, \
+    compute_distance, get_lane_center
 
 FOLLOW = 0
 CHANGE_LEFT = -1
@@ -58,9 +59,9 @@ class Basic_Lanechanging_Agent(object):
         self._base_vehicle_threshold = 5.0  # meters
         # get the last action of the autonomous vehicle,
         # check whether the autonomous vehicle is during a lane-changing behavior
-        self.last_ego_state = FOLLOW
+        self.last_ego_state = Action.LANE_FOLLOW
         self.last_lane_id = get_lane_center(self._map, self._vehicle_location).lane_id
-        self.lane_change = random.choice([CHANGE_LEFT, FOLLOW, CHANGE_RIGHT])
+        self.lane_change = random.choice([Action.LANE_CHANGE_LEFT, Action.LANE_FOLLOW, Action.LANE_CHANGE_RIGHT])
         self.autopilot_step = 0
 
         # set by carla_env.py
@@ -203,35 +204,21 @@ class Basic_Lanechanging_Agent(object):
         #     self.center_next_waypoint = self.center_wps[1]
         # if len(self.right_wps) != 0:
         #     self.right_next_waypoint = self.right_wps[1]
-        self.enable_left_change = self.check_enable_change(self.left_wps, self.distance_to_left_front, self.distance_to_left_rear)
-        self.enable_right_change = self.check_enable_change(self.right_wps, self.distance_to_right_front, self.distance_to_right_rear)
         if self._ignore_change_gap:
-            self.enable_left_change = True
-            self.enable_right_change = True
+            if len(self.left_wps)!=0:
+                self.enable_left_change = True
+            if len(self.right_wps)!=0:
+                self.enable_right_change = True
         else:
             self.enable_left_change = False
             self.enable_right_change = False
-            if self.distance_to_left_front / self.distance_to_center_front > 1.1 and self.distance_to_left_rear > 20:
+            if len(self.left_wps)!=0 and self.distance_to_left_front / self.distance_to_center_front > 1.1 and self.distance_to_left_rear > 20:
                 self.enable_left_change = True
-            if self.distance_to_right_front / self.distance_to_center_front > 1.1 and self.distance_to_right_rear > 20:
+            if len(self.right_wps)!=0 and self.distance_to_right_front / self.distance_to_center_front > 1.1 and self.distance_to_right_rear > 20:
                 self.enable_right_change = True
         print("distance enable: ", self.distance_to_left_front, self.distance_to_center_front,
               self.distance_to_right_front, self.distance_to_left_rear, self.distance_to_center_rear,
               self.distance_to_right_rear, self.enable_left_change, self.enable_right_change)
-
-    def check_enable_change(self, wps_queue, front_distacne, rear_distance):
-        """
-        check whether enbable a lane-changing behavior
-        :param front_distacne:
-        :param rear_distance:
-        :return:
-        """
-        enable = False
-        V = 10
-        T = 1.5
-        if len(wps_queue) != 0 and front_distacne >= V * T and rear_distance >= V * T:
-            enable = True
-        return enable
 
     def compute_s_distance(self, wps_list, target_location):
         """
@@ -274,23 +261,24 @@ class Basic_Lanechanging_Agent(object):
             hazard_detected = True
 
         if current_lane == -2:
-            self.lane_change = random.choice(self.center_random_change)
+            lane_change = random.choice(self.center_random_change)
         elif current_lane == -1:
-            self.lane_change = random.choice(self.left_random_change)
+            lane_change = random.choice(self.left_random_change)
         elif current_lane == -3:
-            self.lane_change = random.choice(self.right_random_change)
+            lane_change = random.choice(self.right_random_change)
         else:
             # just to avoid error, dont work
-            self.lane_change = 0
+            lane_change = 0
+        self.lane_change=Action(lane_change)
 
         if not under_rl:
             if current_lane == target_lane:
                 new_action = self.lane_change
-                if new_action == -1 and not self.enable_left_change:
-                    new_action = 0
-                if new_action == 1 and not self.enable_right_change:
-                    new_action = 0
-                new_target_lane = current_lane - new_action
+                if new_action == Action.LANE_CHANGE_LEFT and not self.enable_left_change:
+                    new_action = Action.LANE_FOLLOW
+                if new_action == Action.LANE_CHANGE_RIGHT and not self.enable_right_change:
+                    new_action = Action.LANE_FOLLOW
+                new_target_lane = current_lane - new_action.value
             else:
                 new_action = last_action
                 new_target_lane = target_lane
@@ -310,9 +298,9 @@ class Basic_Lanechanging_Agent(object):
                                                     'right_wps': self.right_wps,
                                                     'new_action': new_action})
             if modify_change_steer:
-                if new_action == -1:
+                if new_action == Action.LANE_CHANGE_LEFT:
                     control.steer = np.clip(control.steer, -1, 0)
-                elif new_action == 1:
+                elif new_action == Action.LANE_CHANGE_RIGHT:
                     control.steer = np.clip(control.steer, 0, 1)
             if hazard_detected:
                 control = self.add_emergency_stop(control)
@@ -540,13 +528,13 @@ class LocalPlanner(object):
             next_wp = 3
         elif self._min_distance > 3:
             next_wp = 4
-        if new_action == -1:
+        if new_action == Action.LANE_CHANGE_LEFT:
             self.target_waypoint = left_wps[next_wp+10-1]
             # print('left target waypoint: ', self.target_waypoint)
-        elif new_action == 0:
+        elif new_action == Action.LANE_FOLLOW:
             self.target_waypoint = center_wps[next_wp+2-1]
             # print('center target waypoint: ', self.target_waypoint)
-        elif new_action == 1:
+        elif new_action == Action.LANE_CHANGE_RIGHT:
             self.target_waypoint = right_wps[next_wp+10-1]
             # print('right target waypoint: ', self.target_waypoint)
         # print("current location and target location: ", veh_location, self.target_waypoint.transform.location)

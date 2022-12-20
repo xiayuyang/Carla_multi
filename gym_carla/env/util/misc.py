@@ -83,7 +83,7 @@ def get_lane_center(map, location):
     #     shoulder = map.get_waypoint(location, project_to_road=True,lane_type=carla.LaneType.Shoulder)
     #     lane_center = shoulder.get_left_lane()
 
-    lane_center = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Driving)
+    lane_center = map.get_waypoint(location, project_to_road=True, lane_type=carla.LaneType.Driving|carla.LaneType.Shoulder|carla.LaneType.Sidewalk)
     road_id = lane_center.road_id
     lane_id = lane_center.lane_id
     # print('before process road_id and lane_id: ', road_id, lane_id)

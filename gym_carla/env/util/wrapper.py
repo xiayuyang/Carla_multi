@@ -66,10 +66,10 @@ class VehicleWrapper:
             if 'right_rear_veh' in opt:
                 VehicleWrapper.right_rear_veh=opt['right_rear_veh']
 
-class ActionWrapper(Enum):
+class Action(Enum):
     """Parametrized Action for P-DQN"""
-    LANE_CHANGE_LEFT=-1
     LANE_FOLLOW=0
+    LANE_CHANGE_LEFT=-1
     LANE_CHANGE_RIGHT=1
     STOP=2
 
@@ -86,7 +86,9 @@ def process_lane_wp(wps_list, ego_vehicle_z, ego_forward_vector, my_sample_ratio
         idx = idx + 1
     return np.array(wps)
 
-def process_veh(ego_vehicle, vehicle_inlane, left_wall, right_wall,vehicle_proximity):
+def process_veh(ego_vehicle, vehs_info, left_wall, right_wall,vehicle_proximity):
+    vehicle_inlane=[vehs_info.left_front_veh,vehs_info.center_front_veh,vehs_info.right_front_veh,
+            vehs_info.left_rear_veh,vehs_info.center_rear_veh,vehs_info.right_rear_veh]
     ego_speed = get_speed(ego_vehicle, False)
     ego_location = ego_vehicle.get_location()
     ego_bounding_x = ego_vehicle.bounding_box.extent.x
@@ -140,7 +142,7 @@ def process_veh(ego_vehicle, vehicle_inlane, left_wall, right_wall,vehicle_proxi
     # print(all_v_info)
     return np.array(all_v_info)
 
-def process_action(a_index, steer):
+def process_steer(a_index, steer):
     # left: steering is negative[-1, 0], right: steering is positive[0, 1]
     processed_steer = steer
     if a_index == 0:
@@ -149,16 +151,15 @@ def process_action(a_index, steer):
         processed_steer = steer * 0.5 + 0.5
     return processed_steer
 
-def recovery_action(action, action_param):
+def recover_steer(a_index, steer):
     # recovery [-1, 1] from left change and right change
-    steer = action_param[2*action]
-    if action == 0:
-        steer = np.clip(steer, -1, 0.1)
-        steer = (steer + 0.5) * 2
-    elif action == 2:
-        steer = np.clip(steer, -0.1, 1)
-        steer = (steer - 0.5) * 2
-    return steer
+    recovered_steer=steer
+    if a_index==0:
+        recovered_steer=(steer+0.5)/0.5
+    elif a_index ==2:
+        recovered_steer=(steer-0.5)/0.5
+    recovered_steer=np.clip(recovered_steer,-1,1)
+    return recovered_steer
 
 def fill_action_param(action, steer, throttle_brake, action_param, modify_change_steer):
     if not modify_change_steer:

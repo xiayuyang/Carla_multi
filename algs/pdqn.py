@@ -401,6 +401,7 @@ class P_DQN:
         q_values = self.critic(batch_s, batch_a_param)
         q = q_values.gather(1, batch_a.view(-1, 1)).squeeze()
         loss_q = self.loss(q, q_targets)
+        print("Loss_Q:",loss_q)
 
         self.critic_optimizer.zero_grad()
         loss_q.backward()

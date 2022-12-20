@@ -8,7 +8,7 @@ from algs.pdqn import P_DQN
 from gym_carla.env.settings import ARGS
 from gym_carla.env.carla_env import CarlaEnv
 from process import start_process, kill_process
-from gym_carla.env.util.wrapper import fill_action_param
+from gym_carla.env.util.wrapper import fill_action_param,recover_steer
 from collections import deque
 
 # neural network hyper parameters
@@ -37,7 +37,6 @@ train_pdqn = True
 modify_change_steer = True
 action_mask = False
 ignore_traffic_light = True
-remove_lane_center_in_change = False
 base_name = f'origin_{TTC_threshold}_NOCA'
 
 
@@ -48,8 +47,7 @@ def main():
     logging.basicConfig(format='%(levelname)s: %(message)s', level=log_level)
 
     # env=gym.make('CarlaEnv-v0')
-    env = CarlaEnv(args, train_pdqn=train_pdqn, modify_change_steer=modify_change_steer,
-                   remove_lane_center_in_change=remove_lane_center_in_change)
+    env = CarlaEnv(args, train_pdqn=train_pdqn, modify_change_steer=modify_change_steer)
 
     done = False
     truncated = False
