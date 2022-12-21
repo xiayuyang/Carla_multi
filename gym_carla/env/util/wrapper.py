@@ -43,6 +43,11 @@ class VehicleWrapper:
     center_rear_veh=None
     right_front_veh=None
     right_rear_veh=None
+    """distance sequence:
+    distance_to_front_vehicles:[left_front_veh,center_front_veh,right_front_veh]
+    distance_to_rear_vehicles:[left_rear_veh,center_rear_veh,right_rear_veh]"""
+    distance_to_front_vehicles=None
+    distance_to_rear_vehicles=None
 
     def __init__(self,opt=None) -> None:
         if not opt:
@@ -52,6 +57,8 @@ class VehicleWrapper:
             VehicleWrapper.center_rear_veh=None
             VehicleWrapper.right_front_veh=None
             VehicleWrapper.right_rear_veh=None
+            VehicleWrapper.distance_to_front_vehicles=None
+            VehicleWrapper.distance_to_rear_vehicles=None
         else:
             if 'left_front_veh' in opt:
                 VehicleWrapper.left_front_veh=opt['left_front_veh']
@@ -65,6 +72,10 @@ class VehicleWrapper:
                 VehicleWrapper.right_front_veh=opt['right_front_veh']
             if 'right_rear_veh' in opt:
                 VehicleWrapper.right_rear_veh=opt['right_rear_veh']
+            if 'dis_to_front_vehs' in opt:
+                VehicleWrapper.distance_to_front_vehicles=opt['dis_to_front_vehs']
+            if 'dis_to_rear_vehs' in opt:
+                VehicleWrapper.distance_to_rear_vehicles=opt['dis_to_rear_vehs']
 
 class SpeedState(Enum):
     """Different ego vehicle speed state

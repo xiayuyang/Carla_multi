@@ -20,10 +20,6 @@ from gym_carla.env.agent.pid_controller import VehiclePIDController
 from gym_carla.env.util.misc import get_speed, draw_waypoints, is_within_distance, get_trafficlight_trigger_location, \
     compute_distance, get_lane_center
 
-FOLLOW = 0
-CHANGE_LEFT = -1
-CHANGE_RIGHT = 1
-
 class Basic_Lanechanging_Agent(object):
     """
     BasicAgent implements an agent that navigates the scene.
@@ -71,7 +67,6 @@ class Basic_Lanechanging_Agent(object):
         self.left_rear_wps = None
         self.center_rear_wps = None
         self.right_rear_wps = None
-        self.vehicle_inlane = None
 
         self.distance_to_left_front = None
         self.distance_to_center_front = None
@@ -146,15 +141,6 @@ class Basic_Lanechanging_Agent(object):
         control.hand_brake = False
         return control
 
-    def calculate_distance_to_front(self, wps, vehicle):
-        if len(wps) == 0:
-            dis = 0
-        else:
-            dis = self._buffer_size
-        if vehicle is not None:
-            dis = self.compute_s_distance(wps, vehicle.get_location())
-        return dis
-
     def set_info(self, info_dict):
         """
         :param left_wps: waypoints in left-front lane
@@ -169,34 +155,17 @@ class Basic_Lanechanging_Agent(object):
         self.left_rear_wps = info_dict['left_rear_wps']
         self.center_rear_wps = info_dict['center_rear_wps']
         self.right_rear_wps = info_dict['right_rear_wps']
-        self.vehicle_inlane = info_dict['vehicle_inlane']
+        self.distance_to_left_front=info_dict['vehs_info'].distance_to_front_vehicles[0]
+        self.distance_to_center_front=info_dict['vehs_info'].distance_to_front_vehicles[1]
+        self.distance_to_right_front=info_dict['vehs_info'].distance_to_front_vehicles[2]
+        self.distance_to_left_rear=info_dict['vehs_info'].distance_to_rear_vehicles[0]
+        self.distance_to_center_rear=info_dict['vehs_info'].distance_to_rear_vehicles[1]
+        self.distance_to_right_rear=info_dict['vehs_info'].distance_to_rear_vehicles[2]
         self._vehicle_location = self._vehicle.get_location()
-        # for wps in self.left_wps:
-        #     print(wps.transform.location)
-        # print('ego_vehicle:', self._vehicle_location)
-        # for i in range(6):
-        #     v = self.vehicle_inlane[i]
-        #     print(v)
-        #     if v is not None:
-        #         print(i, v.get_location())
+
         print('the length of six waypoint queues: ', len(self.left_wps), len(self.center_wps), len(self.right_wps), len(self.left_rear_wps),
               len(self.center_rear_wps), len(self.right_rear_wps))
         # For simplicity, we compute s for front vehicles, and compute Euler distance for rear vehicles.
-        self.distance_to_left_front = self.calculate_distance_to_front(self.left_wps, self.vehicle_inlane[0])
-        self.distance_to_center_front = self.calculate_distance_to_front(self.center_wps, self.vehicle_inlane[1])
-        self.distance_to_right_front = self.calculate_distance_to_front(self.right_wps, self.vehicle_inlane[2])
-        self.distance_to_left_rear = self.calculate_distance_to_front(self.left_rear_wps, self.vehicle_inlane[3])
-        self.distance_to_center_rear = self.calculate_distance_to_front(self.center_rear_wps, self.vehicle_inlane[4])
-        self.distance_to_right_rear = self.calculate_distance_to_front(self.right_rear_wps, self.vehicle_inlane[5])
-        # print("distance with six vehicles", 'distance_to_left_front: ', self.distance_to_left_front,
-        #       'distance_to_center_front: ', self.distance_to_center_front,
-        #       'distance_to_right_front: ', self.distance_to_right_front,
-        #       'distance_to_left_rear: ', self.distance_to_left_rear,
-        #       'distance_to_center_rear: ', self.distance_to_center_rear,
-        #       'distance_to_right_rear: ', self.distance_to_right_rear)
-        # self.distance_to_left_rear = self._vehicle.get_location().distance(self.vehicle_inlane[3].get_location())
-        # self.distance_to_center_rear = self._vehicle.get_location().distance(self.vehicle_inlane[4].get_location())
-        # self.distance_to_right_rear = self._vehicle.get_location().distance(self.vehicle_inlane[5].get_location())
         # set next waypoint that distance == 2m
         # if len(self.left_wps) != 0:
         #     self.left_next_wayppoint = self.left_wps[1]
@@ -220,24 +189,7 @@ class Basic_Lanechanging_Agent(object):
               self.distance_to_right_front, self.distance_to_left_rear, self.distance_to_center_rear,
               self.distance_to_right_rear, self.enable_left_change, self.enable_right_change)
 
-    def compute_s_distance(self, wps_list, target_location):
-        """
-
-        :param wps: 50 waypoints in front
-        :param target_location: the position of a surrounding vehicle of the autonomous vehicle
-        :return: s
-        """
-        min_dis = 1000
-        s = len(wps_list)
-        for i in range(len(wps_list)):
-            wps = wps_list[i]
-            current_dis = wps.transform.location.distance(target_location)
-            if current_dis < min_dis:
-                min_dis = current_dis
-                s = i + 1
-        return s
-
-    def run_step(self, current_lane, target_lane, last_action, under_rl, action, modify_change_steer):
+    def run_step(self, current_lane, last_target_lane, last_action, modify_change_steer):
         self.autopilot_step = self.autopilot_step + 1
         """Execute one step of navigation."""
         hazard_detected = False
@@ -271,41 +223,35 @@ class Basic_Lanechanging_Agent(object):
             lane_change = 0
         self.lane_change=Action(lane_change)
 
-        if not under_rl:
-            if current_lane == target_lane:
-                new_action = self.lane_change
-                if new_action == Action.LANE_CHANGE_LEFT and not self.enable_left_change:
-                    new_action = Action.LANE_FOLLOW
-                if new_action == Action.LANE_CHANGE_RIGHT and not self.enable_right_change:
-                    new_action = Action.LANE_FOLLOW
-                new_target_lane = current_lane - new_action.value
-            else:
-                new_action = last_action
-                new_target_lane = target_lane
+        if current_lane == last_target_lane:
+            new_action = self.lane_change
+            if new_action == Action.LANE_CHANGE_LEFT and not self.enable_left_change:
+                new_action = Action.LANE_FOLLOW
+            if new_action == Action.LANE_CHANGE_RIGHT and not self.enable_right_change:
+                new_action = Action.LANE_FOLLOW
+            new_target_lane = current_lane - new_action.value
         else:
-            new_action = action - 1
-            new_target_lane = target_lane - new_action
-        if under_rl:
-            control = None
-        else:
-            control = self._local_planner.run_step({'distance_to_left_front': self.distance_to_left_front,
-                                                    'distance_to_center_front': self.distance_to_center_front,
-                                                    'distance_to_right_front': self.distance_to_right_front,
-                                                    'distance_to_left_rear': self.distance_to_left_rear,
-                                                    'distance_to_right_rear': self.distance_to_right_rear,
-                                                    'left_wps': self.left_wps,
-                                                    'center_wps': self.center_wps,
-                                                    'right_wps': self.right_wps,
-                                                    'new_action': new_action})
-            if modify_change_steer:
-                if new_action == Action.LANE_CHANGE_LEFT:
-                    control.steer = np.clip(control.steer, -1, 0)
-                elif new_action == Action.LANE_CHANGE_RIGHT:
-                    control.steer = np.clip(control.steer, 0, 1)
-            if hazard_detected:
-                control = self.add_emergency_stop(control)
-        return control, new_target_lane, new_action, [self.distance_to_left_front, self.distance_to_center_front, self.distance_to_right_front], \
-               [self.distance_to_left_rear, self.distance_to_center_rear, self.distance_to_right_rear]
+            new_action = last_action
+            new_target_lane = last_target_lane
+
+        control = self._local_planner.run_step({'distance_to_left_front': self.distance_to_left_front,
+                                                'distance_to_center_front': self.distance_to_center_front,
+                                                'distance_to_right_front': self.distance_to_right_front,
+                                                'distance_to_left_rear': self.distance_to_left_rear,
+                                                'distance_to_right_rear': self.distance_to_right_rear,
+                                                'left_wps': self.left_wps,
+                                                'center_wps': self.center_wps,
+                                                'right_wps': self.right_wps,
+                                                'new_action': new_action})
+        if modify_change_steer:
+            if new_action == Action.LANE_CHANGE_LEFT:
+                control.steer = np.clip(control.steer, -1, 0)
+            elif new_action == Action.LANE_CHANGE_RIGHT:
+                control.steer = np.clip(control.steer, 0, 1)
+        if hazard_detected:
+            control = self.add_emergency_stop(control)
+
+        return control, new_target_lane, new_action
 
     def ignore_traffic_lights(self, active=True):
         """(De)activates the checks for traffic lights"""

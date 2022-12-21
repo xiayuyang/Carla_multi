@@ -36,18 +36,21 @@ class LocalPlanner:
 
         self.vehicle_proximity = opt_dict['vehicle_proximity']
         self.traffic_light_proximity = opt_dict['traffic_light_proximity']
-        self._last_traffic_light=None
+
+        self.waypoints_info=None
+        self.lights_info=None
+        self.vehicles_info=None
 
         self._waypoints_queue.append((self._current_waypoint, RoadOption.LANEFOLLOW))
         # self._waypoints_queue.append( (self._current_waypoint.next(self._sampling_radius)[0], RoadOption.LANEFOLLOW))
         # self._compute_next_waypoints(k=200)
 
     def run_step(self):
-        waypoints_info = self._get_waypoints()
-        light=self._get_traffic_lights()
-        vehicles_info=self._get_vehicles()
+        self.waypoints_info = self._get_waypoints()
+        self.lights_info=self._get_traffic_lights()
+        self.vehicles_info=self._get_vehicles()
     
-        return WaypointWrapper(waypoints_info), light, VehicleWrapper(vehicles_info)
+        return WaypointWrapper(self.waypoints_info), self.lights_info, VehicleWrapper(self.vehicles_info)
 
     # def _get_traffic_lights(self):
     #     lights_list = self._world.get_actors().filter("*traffic_light*")
@@ -125,6 +128,15 @@ class LocalPlanner:
 
     def _get_vehicles(self):
         # retrieve relevant elements for safe navigation, i.e.: other vehicles
+        def caculate_dis(ego_wp,wps,dis_list,veh):
+            if len(wps)==0:
+                dis_list.append(0)
+            else:
+                if veh:
+                    dis_list.append(ego_wp.transform.location.distance(veh.get_location()))
+                else:
+                    dis_list.append(self.vehicle_proximity)
+
         vehicle_list=self._world.get_actors().filter("*vehicle*")
         left_front_veh=self._get_vehicles_one_lane(vehicle_list,True,-1)
         left_rear_veh=self._get_vehicles_one_lane(vehicle_list,False,-1)
@@ -133,12 +145,24 @@ class LocalPlanner:
         right_front_veh=self._get_vehicles_one_lane(vehicle_list,True,1)
         right_rear_veh=self._get_vehicles_one_lane(vehicle_list,False,1)
 
+        distance_to_front_vehicles=[]
+        distance_to_rear_vehicles=[]
+        ego_wp=self._map.get_waypoint(self._vehicle.get_location())
+        caculate_dis(ego_wp.get_left_lane(),self.waypoints_info['left_front_wps'],distance_to_front_vehicles,left_front_veh)
+        caculate_dis(ego_wp,self.waypoints_info['center_front_wps'],distance_to_front_vehicles,center_front_veh)
+        caculate_dis(ego_wp.get_right_lane(),self.waypoints_info['right_front_wps'],distance_to_front_vehicles,right_front_veh)
+        caculate_dis(ego_wp.get_left_lane(),self.waypoints_info['left_rear_wps'],distance_to_rear_vehicles,left_rear_veh)
+        caculate_dis(ego_wp,self.waypoints_info['center_rear_wps'],distance_to_rear_vehicles,center_rear_veh)
+        caculate_dis(ego_wp.get_right_lane(),self.waypoints_info['right_rear_wps'],distance_to_rear_vehicles,right_rear_veh)
+
         return {'left_front_veh':left_front_veh,
                 'left_rear_veh':left_rear_veh,
                 'center_front_veh':center_front_veh,
                 'center_rear_veh':center_rear_veh,
                 'right_front_veh':right_front_veh,
-                'right_rear_veh':right_rear_veh}
+                'right_rear_veh':right_rear_veh,
+                'dis_to_front_vehs':distance_to_front_vehicles,
+                'dis_to_rear_vehs':distance_to_rear_vehicles}
     
     def _get_vehicles_one_lane(self,vehicle_list,direction=True,lane_offset=0):
         """
