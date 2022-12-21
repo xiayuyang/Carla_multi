@@ -78,6 +78,7 @@ class CarlaEnv:
         self.RL_switch = False
 
         self.lights_info=None
+        self.last_lights=None
         self.wps_info=WaypointWrapper()
         self.vehs_info=VehicleWrapper()
         self.control = carla.VehicleControl(throttle=0.0, steer=0.0, brake=0.0,reverse=False, manual_gear_shift=False, gear=1)
@@ -215,8 +216,10 @@ class CarlaEnv:
         self.last_action,self.current_action=Action.LANE_FOLLOW,Action.LANE_FOLLOW
 
         self.wps_info, self.lights_info, self.vehs_info = self.local_planner.run_step()
-        
-        # set ego vehicle controller
+        if self.last_lights and self.lights_info and self.last_lights.state!=self.lights_info.state:
+            #light state change during steps, from red to green 
+            self.vel_buffer.clear()
+
         self._ego_autopilot(True)
 
         # Only use RL controller after ego vehicle speed reach speed_threshold
@@ -439,6 +442,7 @@ class CarlaEnv:
             self.last_action=self.current_action
             self.last_lane=self.current_lane
             self.last_target_lane=self.current_target_lane
+            self.last_lights=self.lights_info
         else:
             temp = self.world.wait_for_tick()
             self.world.on_tick(lambda _: {})
