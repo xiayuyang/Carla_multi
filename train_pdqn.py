@@ -17,8 +17,8 @@ SIGMA_STEER = 0.3
 SIGMA_ACC = 0.5
 THETA = 0.05
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-LR_ACTOR = 0.001
-LR_CRITIC = 0.002
+LR_ACTOR = 0.0002
+LR_CRITIC = 0.0002
 GAMMA = 0.9  # q值更新系数
 TAU = 0.01  # 软更新参数
 EPSILON = 0.5  # epsilon-greedy
@@ -32,7 +32,7 @@ SIGMA_DECAY = 0.9999
 TTC_threshold = 4.001
 clip_grad = 10
 zero_index_gradients = True
-inverting_gradients = False
+inverting_gradients = True
 train_pdqn = True
 modify_change_steer = True
 action_mask = False
@@ -162,7 +162,7 @@ def main():
                                 agent.save_net('./out/ddpg_pre_trained.pth')
                             # TODO: modify rl_control_step
                             if env.rl_control_step > 10000 and env.is_effective_action() and \
-                                    env.RL_switch:
+                                    env.RL_switch and SIGMA_ACC > 0.01:
                                 globals()['SIGMA'] *= SIGMA_DECAY
                                 globals()['SIGMA_STEER'] *= SIGMA_DECAY
                                 globals()['SIGMA_ACC'] *= SIGMA_DECAY

@@ -702,6 +702,7 @@ class CarlaEnv:
             if dis<distance:
                 distance=dis
         max_speed=(distance+0.0001)/max(self.vehicle_proximity,self.traffic_light_proximity)*self.speed_limit
+        max_speed = self.speed_limit
         if v_s * 3.6 > max_speed:
             # fEff = 1
             fEff = math.exp(max_speed - v_s * 3.6)-1
