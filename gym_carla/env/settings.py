@@ -1,7 +1,7 @@
 """This file defines all high level parameters of carla gym environment"""
 import argparse
 
-CARLA_PATH = 'D:\ProgramFiles\Carla\WindowsNoEditor'
+CARLA_PATH = 'D:\WindowsNoEditor'
 # the following road id sets define the chosen route
 ROADS = set()
 DISTURB_ROADS = set()
@@ -95,7 +95,7 @@ ARGS.add_argument(
 ARGS.add_argument(
     '-n', '--num_of_vehicles', type=list,
     help='Total vehicles number which run in simulation',
-    default=[10*3, 15*3, 20*3, 25*3])
+    default=[10*3, 15*3, 20*3])
 ARGS.add_argument(
     '-sa', '--sampling_resolution', type=float,
     help='Distance between generated two waypoints',
@@ -135,7 +135,7 @@ ARGS.add_argument(
     help='TTC threshold')
 ARGS.add_argument(
     '--penalty', type=float,
-    default=20,
+    default=30,
     help='reward penalty for simulation terminated early on account of collision and lane invasion')
 ARGS.add_argument(
     '--lane_change_reward', type=float,

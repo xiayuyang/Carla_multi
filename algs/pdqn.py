@@ -21,16 +21,16 @@ class ReplayBuffer:
         lane_center = info["offlane"]
         reward_ttc = info["TTC"]
         reward_eff = info["velocity"]
-        if reward_ttc < -0.1 or reward_eff < 3:
-            self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
-        if truncated:
-            self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
+        # if reward_ttc < -0.1 or reward_eff < 3:
+        #     self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
+        # if truncated:
+        #     self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         if action == 0 or action == 2:
             self.change_buffer.append((state, action, action_param, reward, next_state, truncated, done))
         self.tmp_buffer.append((state, action, action_param, reward, next_state, truncated, done))
-        if info['lane_changing_reward'] > 0.1:
-            for buf in self.tmp_buffer:
-                self.change_buffer.append(buf)
+        # if info['lane_changing_reward'] > 0.1:
+        #     for buf in self.tmp_buffer:
+        #         self.change_buffer.append(buf)
         self.buffer.append((state, action, action_param, reward, next_state, truncated, done))
         reward_com = info["Comfort"]
         reward_eff = info["velocity"]
@@ -224,6 +224,58 @@ class QValueNet_multi(torch.nn.Module):
         return out
 
 
+class QValueNet_multi_td3(torch.nn.Module):
+    def __init__(self, state_dim, action_param_dim, num_actions) -> None:
+        # parameter state_dim here is a dict
+        super().__init__()
+        self.state_dim = state_dim
+        self.action_param_dim = action_param_dim
+        self.num_actions = num_actions
+        self.left_encoder = lane_wise_cross_attention_encoder(self.state_dim)
+        self.center_encoder = lane_wise_cross_attention_encoder(self.state_dim)
+        self.right_encoder = lane_wise_cross_attention_encoder(self.state_dim)
+        self.ego_encoder = nn.Linear(self.state_dim['ego_vehicle'], 32)
+        self.action_encoder = nn.Linear(self.action_param_dim, 32)
+        self.fc = nn.Linear(256, 256)
+        self.fc_out = nn.Linear(256, self.num_actions)
+
+        self.left_encoder2 = lane_wise_cross_attention_encoder(self.state_dim)
+        self.center_encoder2 = lane_wise_cross_attention_encoder(self.state_dim)
+        self.right_encoder2 = lane_wise_cross_attention_encoder(self.state_dim)
+        self.ego_encoder2 = nn.Linear(self.state_dim['ego_vehicle'], 32)
+        self.action_encoder2 = nn.Linear(self.action_param_dim, 32)
+        self.fc2 = nn.Linear(256, 256)
+        self.fc_out2 = nn.Linear(256, self.num_actions)
+
+        # torch.nn.init.normal_(self.fc1.weight.data,0,0.01)
+        # torch.nn.init.normal_(self.fc_out.weight.data,0,0.01)
+        # torch.nn.init.xavier_normal_(self.fc1.weight.data)
+        # torch.nn.init.xavier_normal_(self.fc_out.weight.data)
+
+    def forward(self, state, action):
+        one_state_dim = self.state_dim['waypoints'] + self.state_dim['conventional_vehicle'] * 2 + self.state_dim['light']
+        ego_info = state[:, 3*one_state_dim:]
+
+        left_enc = self.left_encoder(state[:, :one_state_dim], ego_info)
+        center_enc = self.center_encoder(state[:, one_state_dim:2*one_state_dim], ego_info)
+        right_enc = self.right_encoder(state[:, 2*one_state_dim:3*one_state_dim], ego_info)
+        ego_enc = self.ego_encoder(ego_info)
+        action_enc = self.action_encoder(action)
+        state_ = torch.cat((left_enc, center_enc, right_enc, ego_enc, action_enc), dim=1)
+        hidden = F.relu(self.fc(state_))
+        out = self.fc_out(hidden)
+
+        left_enc2 = self.left_encoder2(state[:, :one_state_dim], ego_info)
+        center_enc2 = self.center_encoder2(state[:, one_state_dim:2*one_state_dim], ego_info)
+        right_enc2 = self.right_encoder2(state[:, 2*one_state_dim:3*one_state_dim], ego_info)
+        ego_enc2 = self.ego_encoder2(ego_info)
+        action_enc2 = self.action_encoder2(action)
+        state_2 = torch.cat((left_enc2, center_enc2, right_enc2, ego_enc2, action_enc2), dim=1)
+        hidden2 = F.relu(self.fc(state_2))
+        out2 = self.fc_out(hidden2)
+        return out, out2
+
+
 class P_DQN:
     def __init__(self, state_dim, action_dim, action_bound, gamma, tau, sigma, sigma_steer, sigma_acc, theta, epsilon,
                  buffer_size, batch_size, actor_lr, critic_lr, clip_grad, zero_index_gradients, inverting_gradients, device) -> None:
@@ -250,6 +302,9 @@ class P_DQN:
         self.indexd = zero_index_gradients
         self.zero_index_gradients = zero_index_gradients
         self.inverting_gradients = inverting_gradients
+        self.add_actor_noise = False
+        self.td3 = False
+        self.policy_freq = 2
         # adjust different types of replay buffer
         #self.replay_buffer = Split_ReplayBuffer(buffer_size)
         self.replay_buffer = ReplayBuffer(buffer_size)
@@ -261,8 +316,12 @@ class P_DQN:
         self.actor = PolicyNet_multi(self.s_dim, self.action_parameter_size, self.a_bound).to(self.device)
         self.actor_target = PolicyNet_multi(self.s_dim, self.action_parameter_size, self.a_bound).to(self.device)
         self.actor_target.load_state_dict(self.actor.state_dict())
-        self.critic = QValueNet_multi(self.s_dim, self.action_parameter_size, self.num_actions).to(self.device)
-        self.critic_target = QValueNet_multi(self.s_dim, self.action_parameter_size, self.num_actions).to(self.device)
+        if not self.td3:
+            self.critic = QValueNet_multi(self.s_dim, self.action_parameter_size, self.num_actions).to(self.device)
+            self.critic_target = QValueNet_multi(self.s_dim, self.action_parameter_size, self.num_actions).to(self.device)
+        else:
+            self.critic = QValueNet_multi_td3(self.s_dim, self.action_parameter_size, self.num_actions).to(self.device)
+            self.critic_target = QValueNet_multi_td3(self.s_dim, self.action_parameter_size, self.num_actions).to(self.device)
         # self.actor = PolicyNet(self.s_dim, self.a_bound).to(self.device)
         # self.actor_target = PolicyNet(self.s_dim, self.a_bound).to(self.device)
         # self.actor_target.load_state_dict(self.actor.state_dict())
@@ -295,7 +354,12 @@ class P_DQN:
                             state_right_wps, state_veh_right_front, state_veh_right_rear, state_light, state_ev), dim=1)
         # print(state_.shape)
         all_action_param = self.actor(state_)
-        q_a = torch.squeeze(self.critic(state_, all_action_param))
+        if not self.td3:
+            q = self.critic(state_, all_action_param)
+        else:
+            q1, q2 = self.critic(state_, all_action_param)
+            q = torch.min(q1, q2)
+        q_a = torch.squeeze(q)
         q_a = q_a.detach().cpu().numpy()
         if action_mask:
             if lane_id == -3:
@@ -394,14 +458,28 @@ class P_DQN:
 
         with torch.no_grad():
             action_param_target = self.actor_target(batch_ns)
-            q_target_values = self.critic_target(batch_ns, action_param_target)
+            if self.add_actor_noise:
+                noise = (torch.rand_like(action_param_target) - 0.5) * 0.01
+                noise = noise.clamp(-0.01, 0.01)
+                action_param_target = action_param_target + noise
+            if not self.td3:
+                q_target_values = self.critic_target(batch_ns, action_param_target)
+            else:
+                q_target_values1, q_target_values2 = self.critic_target(batch_ns, action_param_target)
+                q_target_values = torch.min(q_target_values1, q_target_values2)
             q_prime = torch.max(q_target_values, 1, keepdim=True)[0].squeeze()
             q_targets = batch_r + self.gamma * q_prime * (1 - batch_t)
+        if not self.td3:
+            q_values = self.critic(batch_s, batch_a_param)
+            q = q_values.gather(1, batch_a.view(-1, 1)).squeeze()
+            loss_q = self.loss(q, q_targets)
+        else:
+            q_values1, q_values2 = self.critic(batch_s, batch_a_param)
+            q_values = torch.min(q_values1, q_values2)
+            q = q_values.gather(1, batch_a.view(-1, 1)).squeeze()
+            loss_q = self.loss(q, q_values1) + self.loss(q, q_values2)
 
-        q_values = self.critic(batch_s, batch_a_param)
-        q = q_values.gather(1, batch_a.view(-1, 1)).squeeze()
-        loss_q = self.loss(q, q_targets)
-        print("Loss_Q:",loss_q)
+        print("Loss_Q:", loss_q)
 
         self.critic_optimizer.zero_grad()
         loss_q.backward()
@@ -409,36 +487,41 @@ class P_DQN:
             torch.nn.utils.clip_grad_norm_(self.critic.parameters(), self.clip_grad)
         self.critic_optimizer.step()
 
-        with torch.no_grad():
-            action_param = self.actor(batch_s)
-        action_param.requires_grad = True
-        Q = self.critic(batch_s, action_param)
-        Q_val = Q
-        if self.indexd:
-            Q_indexed = Q_val.gather(1, batch_a.view(-1, 1))
-            Q_loss = torch.mean(Q_indexed)
-        else:
-            Q_loss = torch.mean(torch.sum(Q_val, 1))
+        if self.learn_time % self.policy_freq == 0:
+            with torch.no_grad():
+                action_param = self.actor(batch_s)
+            action_param.requires_grad = True
+            if not self.td3:
+                Q = self.critic(batch_s, action_param)
+                Q_val = Q
+            else:
+                Q1, Q2 = self.critic(batch_s, action_param)
+                Q_val = torch.min(Q1, Q2)
+            if self.indexd:
+                Q_indexed = Q_val.gather(1, batch_a.view(-1, 1))
+                Q_loss = torch.mean(Q_indexed)
+            else:
+                Q_loss = torch.mean(torch.sum(Q_val, 1))
 
-        self.critic.zero_grad()
-        Q_loss.backward()
-        from copy import deepcopy
-        # print('check batch_s whether has grad: ', batch_s.grad_fn)
-        delta_a = deepcopy(action_param.grad.data)
+            self.critic.zero_grad()
+            Q_loss.backward()
+            from copy import deepcopy
+            # print('check batch_s whether has grad: ', batch_s.grad_fn)
+            delta_a = deepcopy(action_param.grad.data)
 
-        action_param = self.actor(Variable(batch_s))
-        delta_a[:] = self._invert_gradients(delta_a, action_param, grad_type="action_parameters", inplace=True)
-        if self.zero_index_gradients:
-            delta_a[:] = self._zero_index_gradients(delta_a, batch_action_indices=batch_a, inplace=True)
+            action_param = self.actor(Variable(batch_s))
+            delta_a[:] = self._invert_gradients(delta_a, action_param, grad_type="action_parameters", inplace=True)
+            if self.zero_index_gradients:
+                delta_a[:] = self._zero_index_gradients(delta_a, batch_action_indices=batch_a, inplace=True)
 
-        out = -torch.mul(delta_a, action_param)
-        self.actor.zero_grad()
-        out.backward(torch.ones(out.shape).to(self.device))
-        if self.clip_grad > 0:
-            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.clip_grad)
-        self.actor_optimizer.step()
-        self.soft_update(self.actor, self.actor_target)
-        self.soft_update(self.critic, self.critic_target)
+            out = -torch.mul(delta_a, action_param)
+            self.actor.zero_grad()
+            out.backward(torch.ones(out.shape).to(self.device))
+            if self.clip_grad > 0:
+                torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.clip_grad)
+            self.actor_optimizer.step()
+            self.soft_update(self.actor, self.actor_target)
+            self.soft_update(self.critic, self.critic_target)
 
     def _print_grad(self, model):
         '''Print the grad of each layer'''
