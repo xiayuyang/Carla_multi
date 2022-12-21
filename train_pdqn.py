@@ -140,7 +140,7 @@ def main():
                                       f"waypoints:{next_state['center_waypoints']}, \n"
                                       #f"waypoints:{next_state['right_waypoints']}, \n"
                                       f"ego_vehicle:{next_state['ego_vehicle']}\n"
-                                      f"light info: {state['light']}\n"
+                                      f"light info: {next_state['light']}\n"
                                       f"action:{action}\n"
                                       f"action_param:{action_param}\n"
                                       f"all_action_param:{all_action_param}\n"

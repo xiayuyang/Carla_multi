@@ -52,15 +52,20 @@ class LocalPlanner:
     # def _get_traffic_lights(self):
     #     lights_list = self._world.get_actors().filter("*traffic_light*")
     #     max_distance = self.traffic_light_proximity
-
-    #     if self._last_traffic_light:
-    #         if self._last_traffic_light.state != carla.TrafficLightState.Red:
-    #             self._last_traffic_light = None
-    #         else:
-    #             return self._last_traffic_light
-
     #     ego_vehicle_location = self._vehicle.get_location()
     #     ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
+
+    #     sel_traffic_light = None
+
+    #     if ego_vehicle_waypoint.is_junction:
+    #         # It is too late. Do not block the intersection! Keep going!
+    #         return sel_traffic_light
+
+    #     # if self._last_traffic_light:
+    #     #     if self._last_traffic_light.state != carla.TrafficLightState.Red:
+    #     #         self._last_traffic_light = None
+    #     #     else:
+    #     #         return self._last_traffic_light
 
     #     for traffic_light in lights_list:
     #         object_location = get_trafficlight_trigger_location(traffic_light)
@@ -76,15 +81,15 @@ class LocalPlanner:
     #         if dot_ve_wp < 0:
     #             continue
 
-    #         if traffic_light.state != carla.TrafficLightState.Red:
-    #             continue
+    #         # if traffic_light.state != carla.TrafficLightState.Red:
+    #         #     continue
 
     #         if is_within_distance(object_waypoint.transform, self._vehicle.get_transform(), max_distance, [0, 90]):
-    #             self._last_traffic_light = traffic_light
+    #             sel_traffic_light = traffic_light
     #             self._world.debug.draw_box(traffic_light.trigger_volume,traffic_light.trigger_volume.rotation,life_time=0)
-    #             return traffic_light
+    #             return sel_traffic_light
 
-    #     return None
+    #     return sel_traffic_light
 
     def _get_traffic_lights(self):
         """
@@ -108,18 +113,13 @@ class LocalPlanner:
             return sel_traffic_light
 
         for traffic_light in lights_list:
-            loc=traffic_light.get_location()
-            min_angle = 100.0
-            magnitude, angle = compute_magnitude_angle(loc,ego_vehicle_location,
-                    self._vehicle.get_transform().rotation.yaw)
-            if magnitude < self.traffic_light_proximity and angle < min_angle:
-                wps=traffic_light.get_affected_lane_waypoints()
-                for wp in wps:
-                    if test_waypoint(wp,False):
-                        sel_traffic_light = traffic_light
-                        min_angle = angle
-                        break
-                break
+            wps=traffic_light.get_stop_waypoints()
+            for wp in wps:
+                if wp.road_id==ego_vehicle_waypoint.road_id:
+                    if wp.lane_id==ego_vehicle_waypoint.lane_id and \
+                            wp.transform.location.distance(ego_vehicle_location)<=self.traffic_light_proximity:
+                        sel_traffic_light=traffic_light
+                        return sel_traffic_light
 
         return sel_traffic_light         
 

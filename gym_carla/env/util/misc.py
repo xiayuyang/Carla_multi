@@ -33,9 +33,8 @@ def test_waypoint(waypoint, ego=False):
     """
     test if a given waypoint is on chosen route
     :param reward: 
-        True means this function is used in get_reward function,
-            since there are some defects in OpenDrive file to determine whether ego vehicle drive out of chosen route
-        False means this function is used elswhere in Carla Env
+        True means the tested waypoint is on normal road
+        False means the tested waypoint is in junction
     """
     # if (waypoint.road_id in STRAIGHT or waypoint.road_id in JUNCTION) and waypoint.lane_id == -1:
     #     return True

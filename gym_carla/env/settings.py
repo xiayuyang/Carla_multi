@@ -1,7 +1,7 @@
 """This file defines all high level parameters of carla gym environment"""
 import argparse
 
-CARLA_PATH = 'D:\WindowsNoEditor'
+CARLA_PATH = 'D:\ProgramFiles\Carla\WindowsNoEditor'
 # the following road id sets define the chosen route
 ROADS = set()
 DISTURB_ROADS = set()
@@ -178,7 +178,7 @@ ARGS.add_argument(
 )
 ARGS.add_argument(
     '--traffic_light_proximity', type=float,
-    default=50.0,
+    default=30.0,
     help='Distance for searching traffic light in front of ego vehicle, unit -- meters,'
     'attention: this value is tricky'
 )
