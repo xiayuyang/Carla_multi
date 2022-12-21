@@ -12,22 +12,11 @@ from gym_carla.env.agent.local_planner import LocalPlanner
 from gym_carla.env.agent.global_planner import GlobalPlanner,RoadOption
 from gym_carla.env.agent.basic_lanechanging_agent import Basic_Lanechanging_Agent
 from gym_carla.env.util.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
-from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper,Action,process_lane_wp,process_veh, \
+from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper,Action,SpeedState,process_lane_wp,process_veh, \
     process_steer,recover_steer,fill_action_param
 from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
     compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
     get_trafficlight_trigger_location, is_within_distance, get_sign,is_within_distance_ahead,get_projection
-
-class SpeedState(Enum):
-    """Different ego vehicle speed state
-        START: Initializing state, speed up the vehicle to speed_threshole, use basic agent controller
-        RUNNING: After initializing, ego speed between speed_min and speed_limit, use RL controller
-        REBOOT: After initializaing, ego speed reaches below speed min, use basic agent controller to speed up ego vehicle to speed_threshold
-    """
-    START = 0
-    RUNNING = 1
-    RUNNING_RL = 2
-    RUNNING_PID = 3
 
 class CarlaEnv:
     def __init__(self, args, train_pdqn=False, modify_change_steer=False, remove_lane_center_in_change=False) -> None:
@@ -1055,8 +1044,8 @@ class CarlaEnv:
             self.traffic_manager.distance_to_leading_vehicle(self.ego_vehicle, self.min_distance)
             if self.ignore_traffic_light:
                 self.traffic_manager.ignore_lights_percentage(self.ego_vehicle, 100)
-                self.traffic_manager.ignore_signs_percentage(self.ego_vehicle, 100)
                 self.traffic_manager.ignore_walkers_percentage(self.ego_vehicle, 100)
+            self.traffic_manager.ignore_signs_percentage(self.ego_vehicle, 100)
             self.traffic_manager.ignore_vehicles_percentage(self.ego_vehicle, 0)
             self.traffic_manager.vehicle_percentage_speed_difference(self.ego_vehicle, speed_diff)
             if self.auto_lanechange and self.speed_state == SpeedState.RUNNING:
@@ -1229,9 +1218,9 @@ class CarlaEnv:
                 if self.ignore_traffic_light:
                     self.traffic_manager.ignore_lights_percentage(
                         self.world.get_actor(response.actor_id), 100)
-                    self.traffic_manager.ignore_signs_percentage(
-                        self.world.get_actor(response.actor_id), 100)
                     self.traffic_manager.ignore_walkers_percentage(
+                        self.world.get_actor(response.actor_id), 100)
+                self.traffic_manager.ignore_signs_percentage(
                         self.world.get_actor(response.actor_id), 100)
                 self.traffic_manager.auto_lane_change(
                     self.world.get_actor(response.actor_id), False)

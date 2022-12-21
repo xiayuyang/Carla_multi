@@ -66,6 +66,17 @@ class VehicleWrapper:
             if 'right_rear_veh' in opt:
                 VehicleWrapper.right_rear_veh=opt['right_rear_veh']
 
+class SpeedState(Enum):
+    """Different ego vehicle speed state
+        START: Initializing state, speed up the vehicle to speed_threshole, use basic agent controller
+        RUNNING: After initializing, ego speed between speed_min and speed_limit, use RL controller
+        REBOOT: After initializaing, ego speed reaches below speed min, use basic agent controller to speed up ego vehicle to speed_threshold
+    """
+    START = 0
+    RUNNING = 1
+    RUNNING_RL = 2
+    RUNNING_PID = 3
+
 class Action(Enum):
     """Parametrized Action for P-DQN"""
     LANE_FOLLOW=0

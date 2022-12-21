@@ -7,7 +7,8 @@ from gym_carla.env.agent.global_planner import RoadOption
 from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper
 from gym_carla.env.settings import ROADS, STRAIGHT, CURVE, JUNCTION, DOUBLE_DIRECTION, DISTURB_ROADS
 from gym_carla.env.util.misc import get_lane_center, get_speed, vector, compute_magnitude_angle, \
-    is_within_distance_ahead, is_within_distance_rear, draw_waypoints, compute_distance, is_within_distance, test_waypoint
+    is_within_distance_ahead, is_within_distance_rear, draw_waypoints, compute_distance, is_within_distance, test_waypoint,\
+    get_trafficlight_trigger_location
 
 class LocalPlanner:
     def __init__(self, vehicle, 
@@ -35,6 +36,7 @@ class LocalPlanner:
 
         self.vehicle_proximity = opt_dict['vehicle_proximity']
         self.traffic_light_proximity = opt_dict['traffic_light_proximity']
+        self._last_traffic_light=None
 
         self._waypoints_queue.append((self._current_waypoint, RoadOption.LANEFOLLOW))
         # self._waypoints_queue.append( (self._current_waypoint.next(self._sampling_radius)[0], RoadOption.LANEFOLLOW))
@@ -46,6 +48,43 @@ class LocalPlanner:
         vehicles_info=self._get_vehicles()
     
         return WaypointWrapper(waypoints_info), light, VehicleWrapper(vehicles_info)
+
+    # def _get_traffic_lights(self):
+    #     lights_list = self._world.get_actors().filter("*traffic_light*")
+    #     max_distance = self.traffic_light_proximity
+
+    #     if self._last_traffic_light:
+    #         if self._last_traffic_light.state != carla.TrafficLightState.Red:
+    #             self._last_traffic_light = None
+    #         else:
+    #             return self._last_traffic_light
+
+    #     ego_vehicle_location = self._vehicle.get_location()
+    #     ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
+
+    #     for traffic_light in lights_list:
+    #         object_location = get_trafficlight_trigger_location(traffic_light)
+    #         object_waypoint = self._map.get_waypoint(object_location)
+
+    #         if object_waypoint.road_id != ego_vehicle_waypoint.road_id:
+    #             continue
+
+    #         ve_dir = ego_vehicle_waypoint.transform.get_forward_vector()
+    #         wp_dir = object_waypoint.transform.get_forward_vector()
+    #         dot_ve_wp = ve_dir.x * wp_dir.x + ve_dir.y * wp_dir.y + ve_dir.z * wp_dir.z
+
+    #         if dot_ve_wp < 0:
+    #             continue
+
+    #         if traffic_light.state != carla.TrafficLightState.Red:
+    #             continue
+
+    #         if is_within_distance(object_waypoint.transform, self._vehicle.get_transform(), max_distance, [0, 90]):
+    #             self._last_traffic_light = traffic_light
+    #             self._world.debug.draw_box(traffic_light.trigger_volume,traffic_light.trigger_volume.rotation,life_time=0)
+    #             return traffic_light
+
+    #     return None
 
     def _get_traffic_lights(self):
         """
