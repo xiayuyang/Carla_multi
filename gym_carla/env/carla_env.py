@@ -953,7 +953,6 @@ class CarlaEnv:
                     avg_vel=0
                     for vel in self.vel_buffer:
                         avg_vel+=vel/self.vel_buffer.maxlen
-                    print(avg_vel)
                     if avg_vel<self.speed_min:
                         logging.warn('vehicle speed too low')
                         return True
