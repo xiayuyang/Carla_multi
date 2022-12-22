@@ -69,12 +69,12 @@ class Basic_Lanechanging_Agent(object):
         self.autopilot_step = 0
 
         # set by carla_env.py
-        self.left_wps = None
-        self.center_wps = None
-        self.right_wps = None
-        self.left_rear_wps = None
-        self.center_rear_wps = None
-        self.right_rear_wps = None
+        self.left_wps = []
+        self.center_wps = []
+        self.right_wps = []
+        self.left_rear_wps = []
+        self.center_rear_wps = []
+        self.right_rear_wps = []
 
         self.distance_to_left_front = None
         self.distance_to_center_front = None
