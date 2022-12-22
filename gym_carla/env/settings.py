@@ -136,7 +136,11 @@ ARGS.add_argument(
 ARGS.add_argument(
     '--penalty', type=float,
     default=30,
-    help='reward penalty for simulation terminated early on account of collision and lane invasion')
+    help='reward penalty for simulation terminated early on account of collision and road invasion')
+ARGS.add_argument(
+    '--lane_penalty', type=float,
+    default=20,
+    help='reward penalty for simulation terminated early on account of lane invasion')
 ARGS.add_argument(
     '--lane_change_reward', type=float,
     default=10,

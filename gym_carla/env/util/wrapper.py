@@ -77,6 +77,12 @@ class VehicleWrapper:
             if 'dis_to_rear_vehs' in opt:
                 VehicleWrapper.distance_to_rear_vehicles=opt['dis_to_rear_vehs']
 
+class Truncated(Enum):
+    """Different truncate situations"""
+    FALSE=-1
+    NORMAL=0
+    CHANGE_LANE_IN_LANE_FOLLOW=1
+
 class SpeedState(Enum):
     """Different ego vehicle speed state
         START: Initializing state, speed up the vehicle to speed_threshole, use basic agent controller
@@ -197,3 +203,29 @@ def fill_action_param(action, steer, throttle_brake, action_param, modify_change
         action_param[0][action*2] = steer
         action_param[0][action*2+1] = throttle_brake
     return action_param
+
+def ttc_reward(ego_veh,target_veh,min_dis,TTC_THRESHOLD):
+    """Caculate the time left before ego vehicle collide with target vehicle"""
+    TTC = float('inf')
+    if target_veh and ego_veh:
+        distance = ego_veh.get_location().distance(target_veh.get_location())
+        vehicle_len = max(abs(ego_veh.bounding_box.extent.x),
+                            abs(ego_veh.bounding_box.extent.y)) + \
+                        max(abs(target_veh.bounding_box.extent.x),
+                            abs(target_veh.bounding_box.extent.y))
+        distance -= vehicle_len
+        if distance < min_dis:
+            TTC = 0.01
+        else:
+            distance -= min_dis
+            rel_speed = get_speed(ego_veh,False) - get_speed(target_veh, False)
+            if abs(rel_speed) > float(0.0000001):
+                TTC = distance / rel_speed
+        # print(distance, TTC)
+    # fTTC=-math.exp(-TTC)
+    if TTC >= 0 and TTC <= TTC_THRESHOLD:
+        fTTC = np.clip(np.log(TTC / TTC_THRESHOLD), -1, 0)
+    else:
+        fTTC = 0
+
+    return fTTC

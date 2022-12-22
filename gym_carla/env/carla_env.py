@@ -12,8 +12,8 @@ from gym_carla.env.agent.local_planner import LocalPlanner
 from gym_carla.env.agent.global_planner import GlobalPlanner,RoadOption
 from gym_carla.env.agent.basic_lanechanging_agent import Basic_Lanechanging_Agent
 from gym_carla.env.util.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
-from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper,Action,SpeedState,process_lane_wp,process_veh, \
-    process_steer,recover_steer,fill_action_param
+from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper,Action,SpeedState,Truncated,process_lane_wp,process_veh, \
+    process_steer,recover_steer,fill_action_param,ttc_reward
 from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
     compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
     get_trafficlight_trigger_location, is_within_distance, get_sign,is_within_distance_ahead,get_projection
@@ -106,6 +106,7 @@ class CarlaEnv:
         # arguments for caculating reward
         self.TTC_THRESHOLD = args.TTC_th
         self.penalty = args.penalty
+        self.lane_penalty=args.lane_penalty
         self.last_acc = 0  # ego vehicle acceration along s in last step
         self.last_yaw = carla.Vector3D()
         self.vel_buffer=deque(maxlen=10)
@@ -478,27 +479,9 @@ class CarlaEnv:
                     f"Before Process Road ID: {l_c.road_id}, Lane ID: {l_c.lane_id}")
             # print(f"Steer:{control_info['Steer']}, Throttle:{control_info['Throttle']}, Brake:{control_info['Brake']}\n")
 
-            return state, reward, truncated, done, self._get_info(control_info)
+            return state, reward, truncated!=Truncated.FALSE, done, self._get_info(control_info)
         else:
-            return state, reward, truncated, done, self._get_info()
-
-    def my_set_destination(self):
-        # print('3')
-        lane_id = get_lane_center(self.map, self.ego_vehicle.get_location())
-        if lane_id == -1:
-            lane_change = random.choice([1])
-            if lane_change:
-                return self.right_wps[-1].transform.location
-        elif lane_id == -2:
-            lane_change = random.choice([-1, 1])
-            if lane_change == -1:
-                return self.left_wps[-1].transform.location
-            else:
-                return self.right_wps[-1].transform.location
-        elif lane_id == -3:
-            lane_change = random.choice([1])
-            if lane_change:
-                return self.left_wps[-1].transform.location
+            return state, reward, truncated!=Truncated.FALSE, done, self._get_info()
 
     def get_observation_space(self):
         """
@@ -606,7 +589,7 @@ class CarlaEnv:
         Com: Ego vehicle comfort, ego vehicle acceration change rate
         Lcen: Distance between ego vehicle location and lane center
         """
-        fTTC=self._ttc_reward(self.ego_vehicle,self.vehs_info.center_front_veh)
+        fTTC=ttc_reward(self.ego_vehicle,self.vehs_info.center_front_veh,self.min_distance,self.TTC_THRESHOLD)
 
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
         yaw_forward = lane_center.transform.get_forward_vector().make_unit_vector()
@@ -673,8 +656,12 @@ class CarlaEnv:
                           'Efficiency': fEff, 'Lane_center': fLcen, 'Yaw': fYaw, 'last_acc': self.last_acc,
                           'cur_acc': cur_acc, 'yaw_change': yaw_change, 'lane_changing_reward': lane_changing_reward,
                           'impact': impact, 'change_in_lane_follow': change_in_lane_follow, 'Abandon': False}
-
-        if self._truncated():
+        
+        truncated=self._truncated()
+        if truncated!=Truncated.FALSE:
+            if truncated==Truncated.CHANGE_LANE_IN_LANE_FOLLOW:
+                return -self.lane_penalty
+                
             history, tags = self.collision_sensor.get_collision_history()
             if len(history) != 0:
                 if SemanticTags.Vehicles in tags:
@@ -702,7 +689,7 @@ class CarlaEnv:
             else:
                 reward = max((right_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
                 # reward = 0
-            rear_ttc_reward = self._ttc_reward(self.vehs_info.center_rear_veh,self.ego_vehicle)
+            rear_ttc_reward = ttc_reward(self.vehs_info.center_rear_veh,self.ego_vehicle,self.min_distance,self.TTC_THRESHOLD)
             # add rear_ttc_reward?
             print('lane change reward and rear ttc reward: ', reward, rear_ttc_reward)
         elif current_lane - last_lane == 1:
@@ -715,38 +702,12 @@ class CarlaEnv:
             else:
                 reward = max((left_front_dis / center_front_dis - 1) * self.lane_change_reward, -self.lane_change_reward)
                 # reward = 0
-            rear_ttc_reward = self._ttc_reward(self.vehs_info.center_rear_veh,self.ego_vehicle)
+            rear_ttc_reward = ttc_reward(self.vehs_info.center_rear_veh,self.ego_vehicle,self.min_distance,self.TTC_THRESHOLD)
             print('lane change reward and rear ttc reward: ', reward, rear_ttc_reward)
         if current_action == Action.LANE_FOLLOW and self.train_pdqn:
             # if change lane in lane following mode, we set this reward=0, but will be truncated
             reward = 0
         return reward
-
-    def _ttc_reward(self,ego_veh,target_veh):
-        """Caculate the time left before ego vehicle collide with target vehicle"""
-        TTC = float('inf')
-        if target_veh and ego_veh:
-            distance = ego_veh.get_location().distance(target_veh.get_location())
-            vehicle_len = max(abs(ego_veh.bounding_box.extent.x),
-                              abs(ego_veh.bounding_box.extent.y)) + \
-                          max(abs(target_veh.bounding_box.extent.x),
-                              abs(target_veh.bounding_box.extent.y))
-            distance -= vehicle_len
-            if distance < self.min_distance:
-                TTC = 0.01
-            else:
-                distance -= self.min_distance
-                rel_speed = get_speed(ego_veh,False) - get_speed(target_veh, False)
-                if abs(rel_speed) > float(0.0000001):
-                    TTC = distance / rel_speed
-            # print(distance, TTC)
-        # fTTC=-math.exp(-TTC)
-        if TTC >= 0 and TTC <= self.TTC_THRESHOLD:
-            fTTC = np.clip(np.log(TTC / self.TTC_THRESHOLD), -1, 0)
-        else:
-            fTTC = 0
-
-        return fTTC
 
     def pdqn_lane_center(self, lane_center, ego_location):
         def compute(center,ego):
@@ -915,13 +876,13 @@ class CarlaEnv:
         if len(self.collision_sensor.get_collision_history()[0]) != 0:
             # Here we judge speed state because there might be collision event when spawning vehicles
             logging.warn('collison happend')
-            return True
+            return Truncated.NORMAL
         if self.current_action == Action.LANE_FOLLOW and self.current_lane != self.last_lane:
             logging.warn('change lane in lane following mode')
-            return True
+            return Truncated.CHANGE_LANE_IN_LANE_FOLLOW
         if not test_waypoint(get_lane_center(self.map,self.ego_vehicle.get_location()),False):
             logging.warn('vehicle drive out of road')
-            return True
+            return Truncated.NORMAL
         if self.speed_state!=SpeedState.START and not self.vehs_info.center_front_veh:
             if not self.lights_info or self.lights_info.state!=carla.TrafficLightState.Red:
                 if len(self.vel_buffer)==self.vel_buffer.maxlen:
@@ -930,7 +891,7 @@ class CarlaEnv:
                         avg_vel+=vel/self.vel_buffer.maxlen
                     if avg_vel<self.speed_min:
                         logging.warn('vehicle speed too low')
-                        return True
+                        return Truncated.NORMAL
             
         # if self.lane_invasion_sensor.get_invasion_count()!=0:
         #     logging.warn('lane invasion occur')
@@ -940,7 +901,7 @@ class CarlaEnv:
         #     return True
         if self.step_info['Yaw'] < -1.0:
             logging.warn('moving in opposite direction')
-            return True
+            return Truncated.NORMAL
         if self.lights_info and self.lights_info.state!=carla.TrafficLightState.Green:
             self.world.debug.draw_point(self.lights_info.get_location(),size=0.3,life_time=0)
             wps=self.lights_info.get_stop_waypoints()
@@ -948,12 +909,12 @@ class CarlaEnv:
                 self.world.debug.draw_point(wp.transform.location,size=0.1,life_time=0)
                 if is_within_distance_ahead(self.ego_vehicle.get_location(),wp.transform.location, wp.transform, self.min_distance):
                     logging.warn('break traffic light rule')
-                    return True
+                    return Truncated.NORMAL
 
-        return False
+        return Truncated.FALSE
 
     def _done(self,truncated):
-        if truncated:
+        if truncated!=Truncated.FALSE:
             return False
         if self.wps_info.center_front_wps[2].transform.location.distance(
                 self.ego_spawn_point.location) < self.sampling_resolution:          

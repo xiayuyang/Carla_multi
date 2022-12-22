@@ -129,10 +129,10 @@ class LocalPlanner:
     def _get_vehicles(self):
         # retrieve relevant elements for safe navigation, i.e.: other vehicles
         def caculate_dis(wps,dis_list,veh):
-            if len(wps)==0:
-                dis_list.append(0)
-            else:
-                if veh:
+            if veh:
+                if len(wps)==0:
+                    dis_list.append(0)
+                else:
                     pre_wps=wps[0].previous(self._sampling_radius)
                     pre_wp=None
                     if len(pre_wps)==1:
@@ -143,8 +143,8 @@ class LocalPlanner:
                                 pre_wp = wp
                         
                     dis_list.append(pre_wp.transform.location.distance(veh.get_location()))
-                else:
-                    dis_list.append(self.vehicle_proximity)
+            else:
+                dis_list.append(self.vehicle_proximity)
 
         vehicle_list=self._world.get_actors().filter("*vehicle*")
         left_front_veh=self._get_vehicles_one_lane(vehicle_list,True,-1)
@@ -192,8 +192,10 @@ class LocalPlanner:
         
         ego_vehicle_location = self._vehicle.get_location()
         ego_vehicle_transform = self._vehicle.get_transform()
-        ego_vehicle_waypoint = self._map.get_waypoint(ego_vehicle_location)
         ego_vehicle_lane_center = get_lane_center(self._map, ego_vehicle_location)
+        if not test_waypoint(ego_vehicle_lane_center):
+            return None
+        
         min_distance = self.vehicle_proximity
         vehicle = None
         lane_id = ego_vehicle_lane_center.lane_id - lane_offset
@@ -257,7 +259,8 @@ class LocalPlanner:
         elif lane_id == -3:
             left = center.get_left_lane()
         else:
-            logging.error("WAYPOINTS GET BUG")
+            lane_center=None
+            #logging.error("WAYPOINTS GET BUG")
 
         left_front_wps=self._get_waypoints_one_lane(left,True)
         left_rear_wps=self._get_waypoints_one_lane(left,False)
