@@ -28,7 +28,7 @@ class Basic_Lanechanging_Agent(object):
     as well as to change its parameters in case a different driving mode is desired.
     """
 
-    def __init__(self, vehicle, target_speed=20, opt_dict={}):
+    def __init__(self, vehicle, dt=1.0/20, opt_dict={}):
         """
         Initialization the agent paramters, the local and the global planner.
 
@@ -49,14 +49,22 @@ class Basic_Lanechanging_Agent(object):
         self._ignore_vehicle = False
         self._ignore_change_gap = False
         self.lanechanging_fps = 50
-        self._target_speed = target_speed
+
+        #PID controller parameter
+        self._dt = dt
+        self._target_speed = 20.0  # Km/h
+        self._args_lateral_dict = {'K_P': 1.95, 'K_I': 0.05, 'K_D': 0.2, 'dt': self._dt}
+        self._args_longitudinal_dict = {'K_P': 1.0, 'K_I': 0.05, 'K_D': 0, 'dt': self._dt}
+        self._max_throt = 0.75
+        self._max_brake = 0.3
+        self._max_steer = 0.8
+        self._offset = 0
+        self._base_min_distance = 3.0
+        self._follow_speed_limits = False
+
         self._sampling_resolution = 2.0
         self._base_tlight_threshold = 5.0  # meters
         self._base_vehicle_threshold = 5.0  # meters
-        # get the last action of the autonomous vehicle,
-        # check whether the autonomous vehicle is during a lane-changing behavior
-        self.last_ego_state = Action.LANE_FOLLOW
-        self.last_lane_id = get_lane_center(self._map, self._vehicle_location).lane_id
         self.lane_change = random.choice([Action.LANE_CHANGE_LEFT, Action.LANE_FOLLOW, Action.LANE_CHANGE_RIGHT])
         self.autopilot_step = 0
 
@@ -83,7 +91,6 @@ class Basic_Lanechanging_Agent(object):
         self.enable_right_change = True
 
         # Change parameters according to the dictionary
-        opt_dict['target_speed'] = target_speed
         if 'ignore_traffic_lights' in opt_dict:
             self._ignore_traffic_lights = opt_dict['ignore_traffic_lights']
         if 'ignore_stop_signs' in opt_dict:
@@ -95,9 +102,9 @@ class Basic_Lanechanging_Agent(object):
         if 'base_vehicle_threshold' in opt_dict:
             self._base_vehicle_threshold = opt_dict['base_vehicle_threshold']
         if 'max_steering' in opt_dict:
-            self._max_steering = opt_dict['max_steering']
+            self._max_steer = opt_dict['max_steering']
         if 'max_throttle' in opt_dict:
-            self._max_throttle = opt_dict['max_throttle']
+            self._max_throt = opt_dict['max_throttle']
         if 'max_brake' in opt_dict:
             self._max_brake = opt_dict['max_brake']
         if 'buffer_size' in opt_dict:
@@ -108,6 +115,8 @@ class Basic_Lanechanging_Agent(object):
             self._ignore_change_gap = opt_dict['ignore_change_gap']
         if 'lanechanging_fps' in opt_dict:
             self.lanechanging_fps = opt_dict['lanechanging_fps']
+        if 'target_speed' in opt_dict:
+            self._target_speed=opt_dict['target_speed']       
 
         print('ignore_front_vehicle, ignore_change_gap: ', self._ignore_vehicle, self._ignore_change_gap)
 
@@ -116,7 +125,13 @@ class Basic_Lanechanging_Agent(object):
         self.right_random_change = []
         self.init_random_change()
 
-        self._local_planner = LocalPlanner(self._vehicle, opt_dict=opt_dict)
+        self._vehicle_controller = VehiclePIDController(self._vehicle,
+                                                args_lateral=self._args_lateral_dict,
+                                                args_longitudinal=self._args_longitudinal_dict,
+                                                offset=self._offset,
+                                                max_throttle=self._max_throt,
+                                                max_brake=self._max_brake,
+                                                max_steering=self._max_steer)
 
     def init_random_change(self):
         for i in range(self.lanechanging_fps):
@@ -234,15 +249,8 @@ class Basic_Lanechanging_Agent(object):
             new_action = last_action
             new_target_lane = last_target_lane
 
-        control = self._local_planner.run_step({'distance_to_left_front': self.distance_to_left_front,
-                                                'distance_to_center_front': self.distance_to_center_front,
-                                                'distance_to_right_front': self.distance_to_right_front,
-                                                'distance_to_left_rear': self.distance_to_left_rear,
-                                                'distance_to_right_rear': self.distance_to_right_rear,
-                                                'left_wps': self.left_wps,
-                                                'center_wps': self.center_wps,
-                                                'right_wps': self.right_wps,
-                                                'new_action': new_action})
+        control = self._PID_run_step(new_action)
+        
         if modify_change_steer:
             if new_action == Action.LANE_CHANGE_LEFT:
                 control.steer = np.clip(control.steer, -1, 0)
@@ -270,6 +278,44 @@ class Basic_Lanechanging_Agent(object):
 
     def get_follow_action(self):
         pass
+
+    def _PID_run_step(self, new_action):
+        """
+        Execute one step of local planning which involves running the longitudinal and lateral PID controllers to
+        follow the waypoints trajectory.
+
+        :param debug: boolean flag to activate waypoints debugging
+        :return: control to be applied
+        """
+
+        # Purge the queue of obsolete waypoints
+        veh_location = self._vehicle.get_location()
+        veh_waypoint = get_lane_center(self._map, veh_location)
+
+        vehicle_speed = get_speed(self._vehicle) / 3.6
+        lane_center_ratio = 1 - veh_waypoint.transform.location.distance(veh_location) / 4
+        self._min_distance = self._base_min_distance * lane_center_ratio
+        print('min_distance: ', self._min_distance)
+        next_wp = 1
+        if self._min_distance > 1:
+            next_wp = 2
+        elif self._min_distance > 2:
+            next_wp = 3
+        elif self._min_distance > 3:
+            next_wp = 4
+        if new_action == Action.LANE_CHANGE_LEFT:
+            self.target_waypoint = self.left_wps[next_wp+10-1]
+            # print('left target waypoint: ', self.target_waypoint)
+        elif new_action == Action.LANE_FOLLOW:
+            self.target_waypoint = self.center_wps[next_wp+2-1]
+            # print('center target waypoint: ', self.target_waypoint)
+        elif new_action == Action.LANE_CHANGE_RIGHT:
+            self.target_waypoint = self.right_wps[next_wp+10-1]
+            # print('right target waypoint: ', self.target_waypoint)
+        # print("current location and target location: ", veh_location, self.target_waypoint.transform.location)
+        control = self._vehicle_controller.run_step(self._target_speed, self.target_waypoint)
+
+        return control
 
     def _vehicle_obstacle_detected(self, max_dis):
         have_dangerous_vehicle = False
@@ -327,165 +373,3 @@ class Basic_Lanechanging_Agent(object):
                 return (True, traffic_light)
 
         return (False, None)
-
-
-class RoadOption(Enum):
-    """
-    RoadOption represents the possible topological configurations when moving from a segment of lane to other.
-
-    """
-    VOID = -1
-    LEFT = 1
-    RIGHT = 2
-    STRAIGHT = 3
-    LANEFOLLOW = 4
-    CHANGELANELEFT = 5
-    CHANGELANERIGHT = 6
-
-
-class LocalPlanner(object):
-    """
-    LocalPlanner implements the basic behavior of following a
-    trajectory of waypoints that is generated on-the-fly.
-
-    The low-level motion of the vehicle is computed by using two PID controllers,
-    one is used for the lateral control and the other for the longitudinal control (cruise speed).
-
-    When multiple paths are available (intersections) this local planner makes a random choice,
-    unless a given global plan has already been specified.
-    """
-
-    def __init__(self, vehicle, opt_dict={}):
-        """
-        :param vehicle: actor to apply to local planner logic onto
-        :param opt_dict: dictionary of arguments with different parameters:
-            dt: time between simulation steps
-            target_speed: desired cruise speed in Km/h
-            sampling_radius: distance between the waypoints part of the plan
-            lateral_control_dict: values of the lateral PID controller
-            longitudinal_control_dict: values of the longitudinal PID controller
-            max_throttle: maximum throttle applied to the vehicle
-            max_brake: maximum brake applied to the vehicle
-            max_steering: maximum steering applied to the vehicle
-            offset: distance between the route waypoints and the center of the lane
-        """
-        self._vehicle = vehicle
-        self._world = self._vehicle.get_world()
-        self._map = self._world.get_map()
-
-        self._vehicle_controller = None
-        self.target_waypoint = None
-        self.target_road_option = None
-
-        self._waypoints_queue = deque(maxlen=10000)
-        self._min_waypoint_queue_length = 100
-        self._stop_waypoint_creation = False
-
-        # Base parameters
-        self._dt = 1.0 / 20.0
-        self._target_speed = 20.0  # Km/h
-        self._sampling_radius = 2.0
-        self._args_lateral_dict = {'K_P': 1.95, 'K_I': 0.05, 'K_D': 0.2, 'dt': self._dt}
-        self._args_longitudinal_dict = {'K_P': 1.0, 'K_I': 0.05, 'K_D': 0, 'dt': self._dt}
-        self._max_throt = 0.75
-        self._max_brake = 0.3
-        self._max_steer = 0.8
-        self._offset = 0
-        self._base_min_distance = 3.0
-        self._follow_speed_limits = False
-
-        # Overload parameters
-        if opt_dict:
-            if 'dt' in opt_dict:
-                self._dt = opt_dict['dt']
-            if 'target_speed' in opt_dict:
-                self._target_speed = opt_dict['target_speed']
-            if 'sampling_radius' in opt_dict:
-                self._sampling_radius = opt_dict['sampling_radius']
-            if 'lateral_control_dict' in opt_dict:
-                self._args_lateral_dict = opt_dict['lateral_control_dict']
-            if 'longitudinal_control_dict' in opt_dict:
-                self._args_longitudinal_dict = opt_dict['longitudinal_control_dict']
-            if 'max_throttle' in opt_dict:
-                self._max_throt = opt_dict['max_throttle']
-            if 'max_brake' in opt_dict:
-                self._max_brake = opt_dict['max_brake']
-            if 'max_steering' in opt_dict:
-                self._max_steer = opt_dict['max_steering']
-            if 'offset' in opt_dict:
-                self._offset = opt_dict['offset']
-            if 'base_min_distance' in opt_dict:
-                self._base_min_distance = opt_dict['base_min_distance']
-            if 'follow_speed_limits' in opt_dict:
-                self._follow_speed_limits = opt_dict['follow_speed_limits']
-
-        # initializing controller
-        self._init_controller()
-
-    def reset_vehicle(self):
-        """Reset the ego-vehicle"""
-        self._vehicle = None
-
-    def _init_controller(self):
-        """Controller initialization"""
-        self._vehicle_controller = VehiclePIDController(self._vehicle,
-                                                        args_lateral=self._args_lateral_dict,
-                                                        args_longitudinal=self._args_longitudinal_dict,
-                                                        offset=self._offset,
-                                                        max_throttle=self._max_throt,
-                                                        max_brake=self._max_brake,
-                                                        max_steering=self._max_steer)
-
-        # Compute the current vehicle waypoint
-        current_waypoint = self._map.get_waypoint(self._vehicle.get_location())
-        self.target_waypoint, self.target_road_option = (current_waypoint, RoadOption.LANEFOLLOW)
-        self._waypoints_queue.append((self.target_waypoint, self.target_road_option))
-
-    def run_step(self, opt_dict):
-        # distance_to_left_front = opt_dict['distance_to_left_front']
-        # distance_to_center_front = opt_dict['distance_to_center_front']
-        # distance_to_right_front = opt_dict['distance_to_right_front']
-        # distance_to_left_rear = opt_dict['distance_to_left_rear']
-        # distance_to_right_rear = opt_dict['distance_to_right_rear']
-        left_wps = opt_dict['left_wps']
-        center_wps = opt_dict['center_wps']
-        right_wps = opt_dict['right_wps']
-        new_action = opt_dict['new_action']
-        """
-        Execute one step of local planning which involves running the longitudinal and lateral PID controllers to
-        follow the waypoints trajectory.
-
-        :param debug: boolean flag to activate waypoints debugging
-        :return: control to be applied
-        """
-
-        # Purge the queue of obsolete waypoints
-        veh_location = self._vehicle.get_location()
-        veh_waypoint = get_lane_center(self._map, veh_location)
-
-        vehicle_speed = get_speed(self._vehicle) / 3.6
-        lane_center_ratio = 1 - veh_waypoint.transform.location.distance(veh_location) / 4
-        self._min_distance = self._base_min_distance * lane_center_ratio
-        print('min_distance: ', self._min_distance)
-        next_wp = 1
-        if self._min_distance > 1:
-            next_wp = 2
-        elif self._min_distance > 2:
-            next_wp = 3
-        elif self._min_distance > 3:
-            next_wp = 4
-        if new_action == Action.LANE_CHANGE_LEFT:
-            self.target_waypoint = left_wps[next_wp+10-1]
-            # print('left target waypoint: ', self.target_waypoint)
-        elif new_action == Action.LANE_FOLLOW:
-            self.target_waypoint = center_wps[next_wp+2-1]
-            # print('center target waypoint: ', self.target_waypoint)
-        elif new_action == Action.LANE_CHANGE_RIGHT:
-            self.target_waypoint = right_wps[next_wp+10-1]
-            # print('right target waypoint: ', self.target_waypoint)
-        # print("current location and target location: ", veh_location, self.target_waypoint.transform.location)
-        control = self._vehicle_controller.run_step(self._target_speed, self.target_waypoint)
-
-        return control
-
-

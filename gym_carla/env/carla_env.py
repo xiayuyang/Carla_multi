@@ -19,7 +19,7 @@ from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration,
     get_trafficlight_trigger_location, is_within_distance, get_sign,is_within_distance_ahead,get_projection
 
 class CarlaEnv:
-    def __init__(self, args, train_pdqn=False, modify_change_steer=False, remove_lane_center_in_change=False) -> None:
+    def __init__(self, args, train_pdqn=False, modify_change_steer=False) -> None:
         super().__init__()
         self.host = args.host
         self.port = args.port
@@ -234,13 +234,12 @@ class CarlaEnv:
         # self.control_sigma={'Steer': random.choice([0,0]),
         #                     'Throttle_brake': random.choice([0,0])}
 
-        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, target_speed=50, 
-                opt_dict={'ignore_traffic_lights': self.ignore_traffic_light,
-                            'ignore_stop_signs': True, 
-                            'sampling_resolution': self.sampling_resolution, 'dt': 1.0/self.fps,
-                            'sampling_radius': self.sampling_resolution, 
+        self.autopilot_controller = Basic_Lanechanging_Agent(self.ego_vehicle, dt=1.0/self.fps,
+                opt_dict={'ignore_traffic_lights': self.ignore_traffic_light,'ignore_stop_signs': True, 
+                            'sampling_resolution': self.sampling_resolution,
                             'max_steering': self.steer_bound, 'max_throttle': self.throttle_bound,'max_brake': self.brake_bound, 
-                            'buffer_size': self.buffer_size, 'ignore_front_vehicle': random.choice([True, False]),
+                            'buffer_size': self.buffer_size, 'target_speed':50,
+                            'ignore_front_vehicle': random.choice([True, False]),
                             'ignore_change_gap': random.choice([True, True, False]), 
                             'lanechanging_fps': random.choice([40, 50, 60])})
 
@@ -960,9 +959,9 @@ class CarlaEnv:
         # if self.lane_invasion_sensor.get_invasion_count()!=0:
         #     logging.warn('lane invasion occur')
         #     return True
-        if self.step_info['Lane_center'] <=-1.0:
-            logging.warn('drive out of road, lane invasion occur')
-            return True
+        # if self.step_info['Lane_center'] <=-1.0:
+        #     logging.warn('drive out of road, lane invasion occur')
+        #     return True
         if self.step_info['Yaw'] < -1.0:
             logging.warn('moving in opposite direction')
             return True
