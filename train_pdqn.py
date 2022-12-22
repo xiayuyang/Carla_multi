@@ -98,16 +98,20 @@ def main():
                                     impact = info['impact'] / 9
                                     if control_state:
                                         # under rl control
-                                        impact_deque.append([state, action, all_action_param, reward, next_state,
-                                                                truncated, done, info])
-                                        if len(impact_deque) == 2:
-                                            experience = impact_deque[0]
-                                            agent.replay_buffer.add(experience[0], experience[1], experience[2],
-                                                                    experience[3] + impact, experience[4], experience[5],
-                                                                    experience[6], experience[7])
-                                        # agent.replay_buffer.add(state, action, all_action_param, reward, next_state,
-                                        #                         truncated, done, info)
-                                        print('rl control in replay buffer: ', action, all_action_param)
+                                        if truncated:
+                                            agent.replay_buffer.add(state, action, all_action_param, reward, next_state,
+                                                                truncated, done, info)
+                                        else:
+                                            impact_deque.append([state, action, all_action_param, reward, next_state,
+                                                                    truncated, done, info])
+                                            if len(impact_deque) == 2:
+                                                experience = impact_deque[0]
+                                                agent.replay_buffer.add(experience[0], experience[1], experience[2],
+                                                                        experience[3] + impact, experience[4], experience[5],
+                                                                        experience[6], experience[7])
+                                            # agent.replay_buffer.add(state, action, all_action_param, reward, next_state,
+                                            #                         truncated, done, info)
+                                            print('rl control in replay buffer: ', action, all_action_param)
                                     else:
                                         # Input the guided action to replay buffer
                                         throttle_brake = -info['Brake'] if info['Brake'] > 0 else info['Throttle']
@@ -116,15 +120,19 @@ def main():
                                         saved_action_param = fill_action_param(action, info['Steer'], throttle_brake,
                                                                                all_action_param, modify_change_steer)
                                         print('agent control in replay buffer: ', action, saved_action_param)
-                                        impact_deque.append([state, action, saved_action_param, reward, next_state,
-                                                                truncated, done, info])
-                                        if len(impact_deque) == 2:
-                                            experience = impact_deque[0]
-                                            agent.replay_buffer.add(experience[0], experience[1], experience[2],
-                                                                    experience[3] + impact, experience[4], experience[5],
-                                                                    experience[6], experience[7])
-                                        # agent.replay_buffer.add(state, action, saved_action_param, reward, next_state,
-                                        #                         truncated, done, info)
+                                        if truncated:
+                                            agent.replay_buffer.add(state, action, saved_action_param, reward, next_state,
+                                                                truncated, done, info)
+                                        else:
+                                            impact_deque.append([state, action, saved_action_param, reward, next_state,
+                                                                    truncated, done, info])
+                                            if len(impact_deque) == 2:
+                                                experience = impact_deque[0]
+                                                agent.replay_buffer.add(experience[0], experience[1], experience[2],
+                                                                        experience[3] + impact, experience[4], experience[5],
+                                                                        experience[6], experience[7])
+                                            # agent.replay_buffer.add(state, action, saved_action_param, reward, next_state,
+                                            #                         truncated, done, info)
                                 # else:
                                 #     # not work
                                 #     # Input the agent action to replay buffer
