@@ -65,7 +65,8 @@ class Basic_Lanechanging_Agent(object):
         self._sampling_resolution = 2.0
         self._base_tlight_threshold = 5.0  # meters
         self._base_vehicle_threshold = 5.0  # meters
-        self.lane_change = random.choice([Action.LANE_CHANGE_LEFT, Action.LANE_FOLLOW, Action.LANE_CHANGE_RIGHT])
+        self.lane_change_mode=False
+        self.last_lane=None
         self.autopilot_step = 0
 
         # set by carla_env.py
@@ -236,18 +237,34 @@ class Basic_Lanechanging_Agent(object):
         else:
             # just to avoid error, dont work
             lane_change = 0
-        self.lane_change=Action(lane_change)
+        lane_change=Action(lane_change)
+        if lane_change == Action.LANE_CHANGE_LEFT and not self.enable_left_change:
+            lane_change = Action.LANE_FOLLOW
+        if lane_change == Action.LANE_CHANGE_RIGHT and not self.enable_right_change:
+            lane_change = Action.LANE_FOLLOW
 
-        if current_lane == last_target_lane:
-            new_action = self.lane_change
-            if new_action == Action.LANE_CHANGE_LEFT and not self.enable_left_change:
-                new_action = Action.LANE_FOLLOW
-            if new_action == Action.LANE_CHANGE_RIGHT and not self.enable_right_change:
-                new_action = Action.LANE_FOLLOW
-            new_target_lane = current_lane - new_action.value
+        if self.last_lane:
+            if current_lane==self.last_lane:
+                if self.lane_change_mode:
+                    #still on last lane, change lane behavior not finish
+                    new_action=last_action
+                    new_target_lane=last_target_lane
+                else:
+                    #lane follow mode
+                    if lane_change!=Action.LANE_FOLLOW:
+                        self.lane_change_mode=True
+                    new_action=lane_change
+                    new_target_lane = current_lane - new_action.value
+            else:
+                #reach dest lane, change lane behavior finish
+                new_action=Action.LANE_FOLLOW
+                new_target_lane=current_lane
+                self.lane_change_mode=False
         else:
-            new_action = last_action
-            new_target_lane = last_target_lane
+            self.lane_change_mode=False
+            new_action=Action.LANE_FOLLOW
+            new_target_lane=current_lane
+        self.last_lane=current_lane
 
         control = self._PID_run_step(new_action)
         
@@ -307,11 +324,12 @@ class Basic_Lanechanging_Agent(object):
             self.target_waypoint = self.left_wps[next_wp+10-1]
             # print('left target waypoint: ', self.target_waypoint)
         elif new_action == Action.LANE_FOLLOW:
-            self.target_waypoint = self.center_wps[next_wp+2-1]
+            self.target_waypoint = self.center_wps[next_wp+5-1]
             # print('center target waypoint: ', self.target_waypoint)
         elif new_action == Action.LANE_CHANGE_RIGHT:
             self.target_waypoint = self.right_wps[next_wp+10-1]
             # print('right target waypoint: ', self.target_waypoint)
+
         # print("current location and target location: ", veh_location, self.target_waypoint.transform.location)
         control = self._vehicle_controller.run_step(self._target_speed, self.target_waypoint)
 
