@@ -135,7 +135,7 @@ class LocalPlanner:
                 if veh:
                     pre_wps=wps[0].previous(self._sampling_radius)
                     pre_wp=None
-                    if len(pre_wp)==1:
+                    if len(pre_wps)==1:
                         pre_wp=pre_wps[0]
                     elif len(pre_wps)!=0:
                         for i, wp in enumerate(pre_wps):
