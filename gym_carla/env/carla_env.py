@@ -875,19 +875,8 @@ class CarlaEnv:
                     print("basic_lanechanging_agent after: last_lane, current_lane, last_target_lane, current_target_lane, last action, current action: ",
                         self.last_lane, self.current_lane, self.last_target_lane, self.current_target_lane, self.last_action.value,self.current_action.value)
             else:
-                if a_index==0:
-                    self.current_action=Action.LANE_CHANGE_LEFT
-                    self.current_target_lane=self.current_lane+1
-                elif a_index==2:
-                    self.current_action=Action.LANE_CHANGE_RIGHT
-                    self.current_target_lane=self.current_lane-1
-                elif a_index==1:
-                    self.current_action=Action.LANE_FOLLOW
-                    self.current_target_lane=self.current_lane
-                else:
-                    #a_index=4
-                    self.current_action=Action.STOP
-                    self.current_target_lane=self.current_lane
+                self.current_action=Action.LANE_FOLLOW
+                self.current_target_lane=self.current_lane
                 print("initial: last_lane, current_lane, last_target_lane, current_target_lane, last action, current action: ",
                         self.last_lane, self.current_lane, self.last_target_lane, self.current_target_lane, self.last_action.value,self.current_action.value)     
         elif self.speed_state == SpeedState.RUNNING:
