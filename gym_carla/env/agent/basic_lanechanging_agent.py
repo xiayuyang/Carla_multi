@@ -228,6 +228,39 @@ class Basic_Lanechanging_Agent(object):
         if affected_by_tlight:
             hazard_detected = True
 
+        new_action,new_target_lane=self._lane_change_action(current_lane,last_target_lane,last_action)
+
+        control = self._PID_run_step(new_action)
+        
+        if modify_change_steer:
+            if new_action == Action.LANE_CHANGE_LEFT:
+                control.steer = np.clip(control.steer, -1, 0)
+            elif new_action == Action.LANE_CHANGE_RIGHT:
+                control.steer = np.clip(control.steer, 0, 1)
+        if hazard_detected:
+            control = self.add_emergency_stop(control)
+
+        return control, new_target_lane, new_action
+
+    def ignore_traffic_lights(self, active=True):
+        """(De)activates the checks for traffic lights"""
+        self._ignore_traffic_lights = active
+
+    def ignore_stop_signs(self, active=True):
+        """(De)activates the checks for stop signs"""
+        self._ignore_stop_signs = active
+
+    def ignore_vehicles(self, active=True):
+        """(De)activates the checks for stop signs"""
+        self._ignore_vehicles = active
+
+    def get_step(self):
+        return self.autopilot_step
+
+    def get_follow_action(self):
+        pass
+    
+    def _lane_change_action(self,current_lane, last_target_lane, last_action):
         if current_lane == -2:
             lane_change = random.choice(self.center_random_change)
         elif current_lane == -1:
@@ -266,35 +299,7 @@ class Basic_Lanechanging_Agent(object):
             new_target_lane=current_lane
         self.last_lane=current_lane
 
-        control = self._PID_run_step(new_action)
-        
-        if modify_change_steer:
-            if new_action == Action.LANE_CHANGE_LEFT:
-                control.steer = np.clip(control.steer, -1, 0)
-            elif new_action == Action.LANE_CHANGE_RIGHT:
-                control.steer = np.clip(control.steer, 0, 1)
-        if hazard_detected:
-            control = self.add_emergency_stop(control)
-
-        return control, new_target_lane, new_action
-
-    def ignore_traffic_lights(self, active=True):
-        """(De)activates the checks for traffic lights"""
-        self._ignore_traffic_lights = active
-
-    def ignore_stop_signs(self, active=True):
-        """(De)activates the checks for stop signs"""
-        self._ignore_stop_signs = active
-
-    def ignore_vehicles(self, active=True):
-        """(De)activates the checks for stop signs"""
-        self._ignore_vehicles = active
-
-    def get_step(self):
-        return self.autopilot_step
-
-    def get_follow_action(self):
-        pass
+        return new_action,new_target_lane
 
     def _PID_run_step(self, new_action):
         """

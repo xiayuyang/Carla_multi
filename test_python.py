@@ -1,6 +1,6 @@
 from collections import deque
 import numpy as np
-import torch
+import torch,carla
 # test deque, is iterable
 # test_deque = deque(maxlen=10)
 # test_deque.append('1')
@@ -67,12 +67,12 @@ import torch
 # d = np.array([[0], [1]])
 # e = d[:, np.newaxis]
 # print(d, e)
-ind = torch.zeros(6, dtype=torch.long)
-ind[0:2] = 0
-ind[2:4] = 1
-ind[4:6] = 2
-ind_tile = ind.repeat(4, 1)
-a = torch.tensor(np.array([[1], [0], [2], [0]]), dtype=torch.int64)
-print(ind_tile != a)
-print(ind_tile)
+t=carla.TrafficLightState.Red
+print(True if t else False)
+q=deque(maxlen=2)
+q.append(1)
+q.append(2)
+print(len(q)==q.maxlen)
+q.clear()
+print(len(q)==q.maxlen)
 # actual_index = ind_tile != batch_action_indices

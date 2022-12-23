@@ -1,7 +1,8 @@
+import carla
 import math
 import numpy as np
 from enum import Enum
-from gym_carla.env.util.misc import get_speed,get_yaw_diff
+from gym_carla.env.util.misc import get_speed,get_yaw_diff,test_waypoint,get_sign
 
 class WaypointWrapper:
     """The location left, right, center is allocated according to the lane of ego vehicle"""
@@ -229,3 +230,86 @@ def ttc_reward(ego_veh,target_veh,min_dis,TTC_THRESHOLD):
         fTTC = 0
 
     return fTTC
+
+def comfort(fps, last_acc, acc, last_yaw, yaw):
+    acc_jerk = -((acc - last_acc) * fps) ** 2 / ((6 * fps) ** 2)
+    yaw_diff = math.degrees(get_yaw_diff(last_yaw, yaw))
+    Yaw_jerk = -abs(yaw_diff) / 90
+    return np.clip(acc_jerk * 0.5 + Yaw_jerk, -1, 0), yaw_diff
+
+def pdqn_lane_center(lane_center, ego_location):
+    def compute(center,ego):
+        Lcen=ego.distance(center.transform.location)
+        center_yaw=lane_center.transform.get_forward_vector()
+        dis=carla.Vector3D(ego.x-lane_center.transform.location.x,
+            ego.y-lane_center.transform.location.y,0)
+        Lcen*=get_sign(dis,center_yaw)
+        return Lcen
+
+    if not test_waypoint(lane_center, True):
+        Lcen = 7
+        fLcen = -2
+        print('lane_center.lane_id, lane_center.road_id, flcen, lane_wid/2: ', lane_center.lane_id,
+                lane_center.road_id, fLcen, lane_center.lane_width / 2)
+    else:
+        Lcen =compute(lane_center,ego_location)
+        fLcen = -abs(Lcen)/(lane_center.lane_width/2)
+        # if self.current_action == Action.LANE_CHANGE_LEFT and self.current_lane == self.last_lane:
+        #     # change left
+        #     center_width=lane_center.lane_width
+        #     lane_center=lane_center.get_left_lane()
+        #     if lane_center is None:
+        #         Lcen = 7
+        #         fLcen = -2
+        #     else:
+        #         Lcen =compute(lane_center,ego_location)
+        #         fLcen = -abs(Lcen) / (lane_center.lane_width/2+center_width)
+        # elif self.current_action == Action.LANE_CHANGE_RIGHT and self.current_lane == self.last_lane:
+        #     #change right
+        #     center_width=lane_center.lane_width
+        #     lane_center=lane_center.get_right_lane()
+        #     if lane_center is None:
+        #         Lcen = 7
+        #         fLcen = -2
+        #     else:
+        #         Lcen =compute(lane_center,ego_location)
+        #         fLcen=-abs(Lcen)/(lane_center.lane_width/2+center_width)
+        # else:
+        #     #lane follow and stop mode
+        #     Lcen =compute(lane_center,ego_location)
+        #     fLcen = -abs(Lcen)/(lane_center.lane_width/2)
+        #print('pdqn_lane_center: Lcen, fLcen: ', Lcen, fLcen)
+    return Lcen, fLcen
+
+def calculate_guide_lane_center(ego_location, lane_center, location, front_distance, rear_distance):
+    Lcen = lane_center.transform.location.distance(ego_location)
+    # print(
+    #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
+    if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
+        fLcen = -2
+        print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen,
+                lane_center.lane_width / 2)
+    else:
+        left = False
+        right = False
+        if lane_center.lane_id != -1 and front_distance[0] > 20 and front_distance[0]/front_distance[1] > 1.2 and rear_distance[0] > 20:
+            left = True
+        if lane_center.lane_id != -3 and front_distance[2] > 20 and front_distance[2]/front_distance[1] > 1.2 and rear_distance[2] > 20:
+            right = True
+        if left:
+            Lcen = lane_center.get_left_lane().transform.location.distance(location)
+            fLcen = - Lcen / lane_center.lane_width
+        elif right:
+            Lcen = lane_center.get_right_lane().transform.location.distance(location)
+            fLcen = - Lcen / lane_center.lane_width
+        else:
+            Lcen = lane_center.transform.location.distance(ego_location)
+            # print(
+            #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
+            if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
+                fLcen = -2
+                print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
+            else:
+                fLcen = - Lcen / (lane_center.lane_width / 2)
+    return Lcen, fLcen
+

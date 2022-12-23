@@ -2,7 +2,7 @@ import time
 import carla
 import random
 import logging
-import math, time
+import math, copy
 import numpy as np
 from enum import Enum
 from queue import Queue
@@ -13,7 +13,7 @@ from gym_carla.env.agent.global_planner import GlobalPlanner,RoadOption
 from gym_carla.env.agent.basic_lanechanging_agent import Basic_Lanechanging_Agent
 from gym_carla.env.util.sensor import CollisionSensor, LaneInvasionSensor, SemanticTags
 from gym_carla.env.util.wrapper import WaypointWrapper,VehicleWrapper,Action,SpeedState,Truncated,process_lane_wp,process_veh, \
-    process_steer,recover_steer,fill_action_param,ttc_reward
+    process_steer,recover_steer,fill_action_param,ttc_reward,comfort,pdqn_lane_center,calculate_guide_lane_center
 from gym_carla.env.util.misc import draw_waypoints, get_speed, get_acceleration, test_waypoint, \
     compute_distance, get_actor_polygons, get_lane_center, remove_unnecessary_objects, get_yaw_diff, \
     get_trafficlight_trigger_location, is_within_distance, get_sign,is_within_distance_ahead,get_projection
@@ -78,7 +78,7 @@ class CarlaEnv:
         self.RL_switch = False
 
         self.lights_info=None
-        self.last_lights=None
+        self.last_light_state=None
         self.wps_info=WaypointWrapper()
         self.vehs_info=VehicleWrapper()
         self.control = carla.VehicleControl(throttle=0.0, steer=0.0, brake=0.0,reverse=False, manual_gear_shift=False, gear=1)
@@ -215,11 +215,9 @@ class CarlaEnv:
         self.last_lane=self.current_lane
         self.last_target_lane,self.current_target_lane=self.current_lane,self.current_lane
         self.last_action,self.current_action=Action.LANE_FOLLOW,Action.LANE_FOLLOW
+        self.last_light_state=None
 
         self.wps_info, self.lights_info, self.vehs_info = self.local_planner.run_step()
-        if self.last_lights and self.lights_info and self.last_lights.state!=self.lights_info.state:
-            #light state change during steps, from red to green 
-            self.vel_buffer.clear()
 
         self._ego_autopilot(True)
 
@@ -387,6 +385,9 @@ class CarlaEnv:
             # print(self.ego_vehicle.get_speed_limit(),get_speed(self.ego_vehicle,False),get_acceleration(self.ego_vehicle,False),sep='\t')
             # route planner
             self.wps_info, self.lights_info, self.vehs_info = self.local_planner.run_step()
+            if self.last_light_state==carla.TrafficLightState.Red and self.lights_info and self.last_light_state!=self.lights_info.state:
+                #light state change during steps, from red to green 
+                self.vel_buffer.clear()
             # marks=lane_center.get_landmarks(self.traffic_light_proximity)
             # if marks:
             #     for mark in marks: 
@@ -442,7 +443,10 @@ class CarlaEnv:
             self.last_action=self.current_action
             self.last_lane=self.current_lane
             self.last_target_lane=self.current_target_lane
-            self.last_lights=self.lights_info
+            if self.lights_info:
+                self.last_light_state=self.lights_info.state
+            else:
+                self.last_light_state=None
         else:
             temp = self.world.wait_for_tick()
             self.world.on_tick(lambda _: {})
@@ -518,7 +522,7 @@ class CarlaEnv:
         lane_center = get_lane_center(self.map, self.ego_vehicle.get_location())
         right_lane_dis = lane_center.get_right_lane().transform.location.distance(self.ego_vehicle.get_location())
         if self.train_pdqn:
-            t, fLcen = self.pdqn_lane_center(lane_center, self.ego_vehicle.get_location())
+            t, fLcen = pdqn_lane_center(lane_center, self.ego_vehicle.get_location())
             ego_t= lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
         else:
             t = lane_center.lane_width / 2 + lane_center.get_right_lane().lane_width / 2 - right_lane_dis
@@ -609,17 +613,17 @@ class CarlaEnv:
         a_3d=self.ego_vehicle.get_acceleration()
         cur_acc,a_t=get_projection(a_3d,yaw_forward)
 
-        fCom, yaw_change = self._comfort(self.last_acc, cur_acc, self.last_yaw, self.ego_vehicle.get_transform().get_forward_vector())
+        fCom, yaw_change = comfort(self.fps,self.last_acc, cur_acc, self.last_yaw, self.ego_vehicle.get_transform().get_forward_vector())
         # jerk = (cur_acc.x - self.last_acc.x) ** 2 / (1.0 / self.fps) + (cur_acc.y - self.last_acc.y) ** 2 / (
         #         1.0 / self.fps)
         # jerk = ((cur_acc.x - self.last_acc.x) * self.fps) ** 2 + ((cur_acc.y - self.last_acc.y) * self.fps) ** 2
         # # whick still requires further testing, longitudinal and lateral
         # fCom = -jerk / ((6 * self.fps) ** 2 + (12 * self.fps) ** 2)
         if self.train_pdqn:
-            Lcen, fLcen = self.pdqn_lane_center(lane_center, self.ego_vehicle.get_location())
+            Lcen, fLcen = pdqn_lane_center(lane_center, self.ego_vehicle.get_location())
         else:
             if self.guide_change:
-                Lcen, fLcen = self.calculate_guide_lane_center(lane_center, self.ego_vehicle.get_location(), 
+                Lcen, fLcen = calculate_guide_lane_center(self.ego_vehicle.get_location(),lane_center, self.ego_vehicle.get_location(), 
                     self.vehs_info.distance_to_front_vehicles,self.vehs_info.distance_to_rear_vehicles)
             else:
                 Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
@@ -647,8 +651,11 @@ class CarlaEnv:
             self.calculate_impact = 0
 
         # reward for lane_changing
-        lane_changing_reward = self._lane_change_reward(self.last_action, self.last_lane, self.current_lane, self.current_action,
-                self.vehs_info.distance_to_front_vehicles, self.vehs_info.distance_to_rear_vehicles)
+        if not test_waypoint(lane_center):
+            lane_changing_reward = 0
+        else:
+            lane_changing_reward = self._lane_change_reward(self.last_action, self.last_lane, self.current_lane, self.current_action,
+                    self.vehs_info.distance_to_front_vehicles, self.vehs_info.distance_to_rear_vehicles)
         # flag: In the lane follow mode, the ego vehicle pass the lane
         change_in_lane_follow = self.current_action == 0 and self.current_lane != self.last_lane
 
@@ -679,6 +686,9 @@ class CarlaEnv:
         print('distance_to_front_vehicles, distance_to_rear_vehicles: ', distance_to_front_vehicles, distance_to_rear_vehicles)
         # still the distances of the last time step
         reward = 0
+        if current_action == Action.LANE_FOLLOW and self.train_pdqn:
+            # if change lane in lane following mode, we set this reward=0, but will be truncated
+            return reward
         if current_lane - last_lane == -1:
             # change right
             self.calculate_impact = 1
@@ -704,92 +714,78 @@ class CarlaEnv:
                 # reward = 0
             rear_ttc_reward = ttc_reward(self.vehs_info.center_rear_veh,self.ego_vehicle,self.min_distance,self.TTC_THRESHOLD)
             print('lane change reward and rear ttc reward: ', reward, rear_ttc_reward)
-        if current_action == Action.LANE_FOLLOW and self.train_pdqn:
-            # if change lane in lane following mode, we set this reward=0, but will be truncated
-            reward = 0
+
         return reward
 
-    def pdqn_lane_center(self, lane_center, ego_location):
-        def compute(center,ego):
-            Lcen=ego.distance(center.transform.location)
-            center_yaw=lane_center.transform.get_forward_vector()
-            dis=carla.Vector3D(ego.x-lane_center.transform.location.x,
-                ego.y-lane_center.transform.location.y,0)
-            Lcen*=get_sign(dis,center_yaw)
-            return Lcen
+    def _truncated(self):
+        """Calculate whether to terminate the current episode"""
+        if len(self.collision_sensor.get_collision_history()[0]) != 0:
+            # Here we judge speed state because there might be collision event when spawning vehicles
+            logging.warn('collison happend')
+            return Truncated.NORMAL
+        if self.current_action == Action.LANE_FOLLOW and self.current_lane != self.last_lane:
+            logging.warn('change lane in lane following mode')
+            return Truncated.CHANGE_LANE_IN_LANE_FOLLOW
+        if not test_waypoint(get_lane_center(self.map,self.ego_vehicle.get_location()),False):
+            logging.warn('vehicle drive out of road')
+            return Truncated.NORMAL
+        if self.speed_state!=SpeedState.START and not self.vehs_info.center_front_veh:
+            if not self.lights_info or self.lights_info.state!=carla.TrafficLightState.Red:
+                if len(self.vel_buffer)==self.vel_buffer.maxlen:
+                    avg_vel=0
+                    for vel in self.vel_buffer:
+                        avg_vel+=vel/self.vel_buffer.maxlen
+                    if avg_vel*3.6<self.speed_min:
+                        logging.warn('vehicle speed too low')
+                        return Truncated.NORMAL
+            
+        # if self.lane_invasion_sensor.get_invasion_count()!=0:
+        #     logging.warn('lane invasion occur')
+        #     return True
+        # if self.step_info['Lane_center'] <=-1.0:
+        #     logging.warn('drive out of road, lane invasion occur')
+        #     return True
+        if self.step_info['Yaw'] < -1.0:
+            logging.warn('moving in opposite direction')
+            return Truncated.NORMAL
+        if self.lights_info and self.lights_info.state!=carla.TrafficLightState.Green:
+            self.world.debug.draw_point(self.lights_info.get_location(),size=0.3,life_time=0)
+            wps=self.lights_info.get_stop_waypoints()
+            for wp in wps:
+                self.world.debug.draw_point(wp.transform.location,size=0.1,life_time=0)
+                if is_within_distance_ahead(self.ego_vehicle.get_location(),wp.transform.location, wp.transform, self.min_distance):
+                    logging.warn('break traffic light rule')
+                    return Truncated.NORMAL
 
-        if not test_waypoint(lane_center, True):
-            Lcen = 7
-            fLcen = -2
-            print('lane_center.lane_id, lane_center.road_id, flcen, lane_wid/2: ', lane_center.lane_id,
-                  lane_center.road_id, fLcen, lane_center.lane_width / 2)
-        else:
-            Lcen =compute(lane_center,ego_location)
-            fLcen = -abs(Lcen)/(lane_center.lane_width/2)
-            # if self.current_action == Action.LANE_CHANGE_LEFT and self.current_lane == self.last_lane:
-            #     # change left
-            #     center_width=lane_center.lane_width
-            #     lane_center=lane_center.get_left_lane()
-            #     if lane_center is None:
-            #         Lcen = 7
-            #         fLcen = -2
-            #     else:
-            #         Lcen =compute(lane_center,ego_location)
-            #         fLcen = -abs(Lcen) / (lane_center.lane_width/2+center_width)
-            # elif self.current_action == Action.LANE_CHANGE_RIGHT and self.current_lane == self.last_lane:
-            #     #change right
-            #     center_width=lane_center.lane_width
-            #     lane_center=lane_center.get_right_lane()
-            #     if lane_center is None:
-            #         Lcen = 7
-            #         fLcen = -2
-            #     else:
-            #         Lcen =compute(lane_center,ego_location)
-            #         fLcen=-abs(Lcen)/(lane_center.lane_width/2+center_width)
-            # else:
-            #     #lane follow and stop mode
-            #     Lcen =compute(lane_center,ego_location)
-            #     fLcen = -abs(Lcen)/(lane_center.lane_width/2)
-            #print('pdqn_lane_center: Lcen, fLcen: ', Lcen, fLcen)
-        return Lcen, fLcen
+        return Truncated.FALSE
 
-    def _comfort(self, last_acc, acc, last_yaw, yaw):
-        acc_jerk = -((acc - last_acc) * self.fps) ** 2 / ((6 * self.fps) ** 2)
-        yaw_diff = math.degrees(get_yaw_diff(last_yaw, yaw))
-        Yaw_jerk = -abs(yaw_diff) / 90
-        return np.clip(acc_jerk * 0.5 + Yaw_jerk, -1, 0), yaw_diff
+    def _done(self,truncated):
+        if truncated!=Truncated.FALSE:
+            return False
+        if self.wps_info.center_front_wps[2].transform.location.distance(
+                self.ego_spawn_point.location) < self.sampling_resolution:          
+            # The local planner's waypoint list has been depleted
+            logging.info('vehicle reach destination, simulation terminate')                                 
+            return True
+        if self.wps_info.left_front_wps and \
+                self.wps_info.left_front_wps[2].transform.location.distance(
+                self.ego_spawn_point.location)<self.sampling_resolution:
+            # The local planner's waypoint list has been depleted
+            logging.info('vehicle reach destination, simulation terminate')
+            return True
+        if self.wps_info.right_front_wps and \
+                self.wps_info.right_front_wps[2].transform.location.distance(
+                self.ego_spawn_point.location)<self.sampling_resolution:
+            # The local planner's waypoint list has been depleted
+            logging.info('vehicle reach destination, simulation terminate')
+            return True
+        if not self.RL_switch:
+            if self.time_step > 5000:
+                # Let the traffic manager only execute 5000 steps. or it can fill the replay buffer
+                logging.info('5000 steps passed under traffic manager control')
+                return True
 
-    def calculate_guide_lane_center(self, lane_center, location, front_distance, rear_distance):
-        Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
-        # print(
-        #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
-        if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
-            fLcen = -2
-            print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen,
-                  lane_center.lane_width / 2)
-        else:
-            left = False
-            right = False
-            if lane_center.lane_id != -1 and front_distance[0] > 20 and front_distance[0]/front_distance[1] > 1.2 and rear_distance[0] > 20:
-                left = True
-            if lane_center.lane_id != -3 and front_distance[2] > 20 and front_distance[2]/front_distance[1] > 1.2 and rear_distance[2] > 20:
-                right = True
-            if left:
-                Lcen = lane_center.get_left_lane().transform.location.distance(location)
-                fLcen = - Lcen / lane_center.lane_width
-            elif right:
-                Lcen = lane_center.get_right_lane().transform.location.distance(location)
-                fLcen = - Lcen / lane_center.lane_width
-            else:
-                Lcen = lane_center.transform.location.distance(self.ego_vehicle.get_location())
-                # print(
-                #     f"Lane Center:{Lcen}, Road ID:{lane_center.road_id}, Lane ID:{lane_center.lane_id}, Yaw:{self.ego_vehicle.get_transform().rotation.yaw}")
-                if not test_waypoint(lane_center, True) or Lcen > lane_center.lane_width / 2 + 0.1:
-                    fLcen = -2
-                    print('lane_center.lane_id, lcen, flcen: ', lane_center.lane_id, lane_center.road_id, Lcen, fLcen, lane_center.lane_width / 2)
-                else:
-                    fLcen = - Lcen / (lane_center.lane_width / 2)
-        return Lcen, fLcen
+        return False
 
     def _speed_switch(self,a_index):
         """cont: the control command of RL agent"""
@@ -870,76 +866,6 @@ class CarlaEnv:
             logging.error('CODE LOGIC ERROR')
 
         return 
-
-    def _truncated(self):
-        """Calculate whether to terminate the current episode"""
-        if len(self.collision_sensor.get_collision_history()[0]) != 0:
-            # Here we judge speed state because there might be collision event when spawning vehicles
-            logging.warn('collison happend')
-            return Truncated.NORMAL
-        if self.current_action == Action.LANE_FOLLOW and self.current_lane != self.last_lane:
-            logging.warn('change lane in lane following mode')
-            return Truncated.CHANGE_LANE_IN_LANE_FOLLOW
-        if not test_waypoint(get_lane_center(self.map,self.ego_vehicle.get_location()),False):
-            logging.warn('vehicle drive out of road')
-            return Truncated.NORMAL
-        if self.speed_state!=SpeedState.START and not self.vehs_info.center_front_veh:
-            if not self.lights_info or self.lights_info.state!=carla.TrafficLightState.Red:
-                if len(self.vel_buffer)==self.vel_buffer.maxlen:
-                    avg_vel=0
-                    for vel in self.vel_buffer:
-                        avg_vel+=vel/self.vel_buffer.maxlen
-                    if avg_vel<self.speed_min:
-                        logging.warn('vehicle speed too low')
-                        return Truncated.NORMAL
-            
-        # if self.lane_invasion_sensor.get_invasion_count()!=0:
-        #     logging.warn('lane invasion occur')
-        #     return True
-        # if self.step_info['Lane_center'] <=-1.0:
-        #     logging.warn('drive out of road, lane invasion occur')
-        #     return True
-        if self.step_info['Yaw'] < -1.0:
-            logging.warn('moving in opposite direction')
-            return Truncated.NORMAL
-        if self.lights_info and self.lights_info.state!=carla.TrafficLightState.Green:
-            self.world.debug.draw_point(self.lights_info.get_location(),size=0.3,life_time=0)
-            wps=self.lights_info.get_stop_waypoints()
-            for wp in wps:
-                self.world.debug.draw_point(wp.transform.location,size=0.1,life_time=0)
-                if is_within_distance_ahead(self.ego_vehicle.get_location(),wp.transform.location, wp.transform, self.min_distance):
-                    logging.warn('break traffic light rule')
-                    return Truncated.NORMAL
-
-        return Truncated.FALSE
-
-    def _done(self,truncated):
-        if truncated!=Truncated.FALSE:
-            return False
-        if self.wps_info.center_front_wps[2].transform.location.distance(
-                self.ego_spawn_point.location) < self.sampling_resolution:          
-            # The local planner's waypoint list has been depleted
-            logging.info('vehicle reach destination, simulation terminate')                                 
-            return True
-        if self.wps_info.left_front_wps and \
-                self.wps_info.left_front_wps[2].transform.location.distance(
-                self.ego_spawn_point.location)<self.sampling_resolution:
-            # The local planner's waypoint list has been depleted
-            logging.info('vehicle reach destination, simulation terminate')
-            return True
-        if self.wps_info.right_front_wps and \
-                self.wps_info.right_front_wps[2].transform.location.distance(
-                self.ego_spawn_point.location)<self.sampling_resolution:
-            # The local planner's waypoint list has been depleted
-            logging.info('vehicle reach destination, simulation terminate')
-            return True
-        if not self.RL_switch:
-            if self.time_step > 5000:
-                # Let the traffic manager only execute 5000 steps. or it can fill the replay buffer
-                logging.info('5000 steps passed under traffic manager control')
-                return True
-
-        return False
 
     def _get_info(self, control_info=None):
         """Rerurn simulation running information,
@@ -1043,7 +969,7 @@ class CarlaEnv:
         # Set physical mode only for cars around ego vehicle to save computation
         if self.hybrid:
             self.traffic_manager.set_hybrid_physics_mode(True)
-            self.traffic_manager.set_hybrid_physics_radius(70.0)
+            self.traffic_manager.set_hybrid_physics_radius(100.0)
 
         """The default global speed limit is 30 m/s
         Vehicles' target speed is 70% of their current speed limit unless any other value is set."""
@@ -1138,10 +1064,10 @@ class CarlaEnv:
                 self.traffic_manager.auto_lane_change(
                     self.world.get_actor(response.actor_id), False)
                 # modify change probability
-                # self.traffic_manager.random_left_lanechange_percentage(
-                #     self.world.get_actor(response.actor_id), 10)
-                # self.traffic_manager.random_right_lanechange_percentage(
-                #     self.world.get_actor(response.actor_id), 10)
+                self.traffic_manager.random_left_lanechange_percentage(
+                    self.world.get_actor(response.actor_id), 50)
+                self.traffic_manager.random_right_lanechange_percentage(
+                    self.world.get_actor(response.actor_id), 50)
                 
                 self.traffic_manager.set_route(self.world.get_actor(response.actor_id),
                                                ['Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight', 'Straight'])

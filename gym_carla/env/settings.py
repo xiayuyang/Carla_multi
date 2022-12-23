@@ -109,7 +109,7 @@ ARGS.add_argument(
 ARGS.add_argument(
     '--hybrid',
     action='store_true',
-    default=False,
+    default=True,
     help='Activate hybrid mode for Traffic Manager')
 ARGS.add_argument(
     '--auto_lane_change',
@@ -143,7 +143,7 @@ ARGS.add_argument(
     help='reward penalty for simulation terminated early on account of lane invasion')
 ARGS.add_argument(
     '--lane_change_reward', type=float,
-    default=10,
+    default=20,
     help='reward for lane change according to the distance to the preceding vehicle')
 ARGS.add_argument(
     '--speed_limit', type=float,
@@ -173,24 +173,20 @@ ARGS.add_argument(
 ARGS.add_argument(
     '--pre_train_steps', type=int,
     default=10000,
-    help='Let the RL controller and PID controller alternatively take control every 500 steps'
-)
+    help='Let the RL controller and PID controller alternatively take control every 500 steps')
 ARGS.add_argument(
     '--vehicle_proximity', type=float,
     default=50.0,
-    help='Distance for searching vehicles in front of ego vehicle, unit -- meters'
-)
+    help='Distance for searching vehicles in front of ego vehicle, unit -- meters')
 ARGS.add_argument(
     '--traffic_light_proximity', type=float,
     default=30.0,
     help='Distance for searching traffic light in front of ego vehicle, unit -- meters,'
-    'attention: this value is tricky'
-)
+    'attention: this value is tricky')
 ARGS.add_argument(
     '--min_distance',type=float,
     default=5.0,
-    help='Min distance between two vehicles, unit -- meters'
-)
+    help='Min distance between two vehicles, unit -- meters')
 ARGS.add_argument(
     '--guide_change', type=bool,
     default=True,

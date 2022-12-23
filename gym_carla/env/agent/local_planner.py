@@ -129,10 +129,10 @@ class LocalPlanner:
     def _get_vehicles(self):
         # retrieve relevant elements for safe navigation, i.e.: other vehicles
         def caculate_dis(wps,dis_list,veh):
-            if veh:
-                if len(wps)==0:
-                    dis_list.append(0)
-                else:
+            if len(wps)==0:
+                dis_list.append(0)
+            else:
+                if veh:
                     pre_wps=wps[0].previous(self._sampling_radius)
                     pre_wp=None
                     if len(pre_wps)==1:
@@ -143,8 +143,8 @@ class LocalPlanner:
                                 pre_wp = wp
                         
                     dis_list.append(pre_wp.transform.location.distance(veh.get_location()))
-            else:
-                dis_list.append(self.vehicle_proximity)
+                else:
+                    dis_list.append(self.vehicle_proximity)
 
         vehicle_list=self._world.get_actors().filter("*vehicle*")
         left_front_veh=self._get_vehicles_one_lane(vehicle_list,True,-1)
